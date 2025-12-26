@@ -29,6 +29,14 @@ jobs:
       - name: Lint frontend
         run: cd web && npm run lint
 
+      - name: Build frontend
+        run: cd web && npm run build
+
+      - name: Prepare embed
+        run: |
+          rm -rf cmd/dist
+          cp -r web/dist cmd/dist
+
       - name: Go vet
         run: go vet ./...
 
