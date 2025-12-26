@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { PodInfo, ContainerResource } from '../services/api';
-import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal } from 'lucide-react';
+import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal, Plug } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TerminalModal } from '../components/TerminalModal';
+import { PortForwardModal } from '../components/PortForwardModal';
 
 // Container resource usage bar with request/limit/usage visualization
 function ContainerResourceBar({
@@ -436,6 +437,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   const [selectedPod, setSelectedPod] = useState<PodInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PodInfo | null>(null);
   const [terminalPod, setTerminalPod] = useState<PodInfo | null>(null);
+  const [portForwardPod, setPortForwardPod] = useState<PodInfo | null>(null);
 
   const { data: pods, isLoading, error } = useQuery({
     queryKey: ['pods', namespace],
@@ -529,6 +531,11 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
                         onClick: () => setTerminalPod(pod),
                       },
                       {
+                        label: 'Port Forward',
+                        icon: <Plug className="w-4 h-4" />,
+                        onClick: () => setPortForwardPod(pod),
+                      },
+                      {
                         label: 'Logs',
                         icon: <FileText className="w-4 h-4" />,
                         onClick: () => setLogPod(pod),
@@ -602,6 +609,13 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
           namespace={terminalPod.namespace}
           podName={terminalPod.name}
           onClose={() => setTerminalPod(null)}
+        />
+      )}
+
+      {portForwardPod && (
+        <PortForwardModal
+          pod={portForwardPod}
+          onClose={() => setPortForwardPod(null)}
         />
       )}
     </div>

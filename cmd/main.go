@@ -99,6 +99,7 @@ func main() {
 	rbacHandler := handler.NewRBACHandler(k8sManager)
 	quotaHandler := handler.NewQuotaHandler(k8sManager)
 	searchHandler := handler.NewSearchHandler(k8sManager)
+	portForwardHandler := handler.NewPortForwardHandler(k8sManager)
 
 	// Cluster routes
 	app.GET("/api/clusters", clusterHandler.List)
@@ -114,6 +115,12 @@ func main() {
 	app.GET("/api/pods/{namespace}/{name}/logs", podHandler.Logs)
 	app.GET("/api/pods/{namespace}/{name}/events", podHandler.Events)
 	app.DELETE("/api/pods/{namespace}/{name}", podHandler.Delete)
+
+	// Port forward routes
+	app.GET("/api/portforwards", portForwardHandler.List)
+	app.GET("/api/pods/{namespace}/{name}/portforwards", portForwardHandler.ListForPod)
+	app.POST("/api/pods/{namespace}/{name}/portforward", portForwardHandler.Start)
+	app.DELETE("/api/pods/{namespace}/{name}/portforward", portForwardHandler.Stop)
 
 	// Deployment routes
 	app.GET("/api/deployments", deploymentHandler.List)

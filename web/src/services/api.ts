@@ -13,6 +13,11 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     throw new Error(error || response.statusText);
   }
 
+  // Handle 204 No Content responses
+  if (response.status === 204) {
+    return {} as T;
+  }
+
   const json = await response.json();
   return json.data;
 }
@@ -39,6 +44,7 @@ export interface PodInfo {
   age: string;
   node: string;
   ip: string;
+  ports?: ContainerPort[];
   containers?: ContainerInfo[];
   labels?: Record<string, string>;
 }
@@ -54,12 +60,19 @@ export interface ContainerResource {
   memory: ResourceUsage;
 }
 
+export interface ContainerPort {
+  name?: string;
+  containerPort: number;
+  protocol?: string;
+}
+
 export interface ContainerInfo {
   name: string;
   image: string;
   ready: boolean;
   restartCount: number;
   state: string;
+  ports?: ContainerPort[];
   resources?: ContainerResource;
 }
 
@@ -284,6 +297,14 @@ export interface WarningEventGroup {
   lastSeen: string;
 }
 
+export interface PortForwardInfo {
+  id: string;
+  namespace: string;
+  podName: string;
+  localPort: number;
+  remotePort: number;
+}
+
 export interface StorageClassInfo {
   name: string;
   provisioner: string;
@@ -347,6 +368,21 @@ export const api = {
       request<PodEvent[]>(`/pods/${namespace}/${name}/events`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/pods/${namespace}/${name}`, { method: 'DELETE' }),
+  },
+
+  portForward: {
+    list: () => request<PortForwardInfo[]>('/portforwards'),
+    listForPod: (namespace: string, name: string) =>
+      request<PortForwardInfo[]>(`/pods/${namespace}/${name}/portforwards`),
+    start: (namespace: string, name: string, localPort: number, remotePort: number) =>
+      request<PortForwardInfo>(`/pods/${namespace}/${name}/portforward`, {
+        method: 'POST',
+        body: JSON.stringify({ localPort, remotePort }),
+      }),
+    stop: (namespace: string, name: string, localPort: number, remotePort: number) =>
+      request<{ message: string }>(`/pods/${namespace}/${name}/portforward?localPort=${localPort}&remotePort=${remotePort}`, {
+        method: 'DELETE',
+      }),
   },
 
   deployments: {

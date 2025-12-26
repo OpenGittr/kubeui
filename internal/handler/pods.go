@@ -32,8 +32,15 @@ type PodInfo struct {
 	Age        string            `json:"age"`
 	Node       string            `json:"node"`
 	IP         string            `json:"ip"`
+	Ports      []ContainerPort   `json:"ports,omitempty"`
 	Containers []ContainerInfo   `json:"containers,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
+}
+
+type ContainerPort struct {
+	Name          string `json:"name,omitempty"`
+	ContainerPort int32  `json:"containerPort"`
+	Protocol      string `json:"protocol,omitempty"`
 }
 
 type ContainerInfo struct {
@@ -42,6 +49,7 @@ type ContainerInfo struct {
 	Ready        bool              `json:"ready"`
 	RestartCount int32             `json:"restartCount"`
 	State        string            `json:"state"`
+	Ports        []ContainerPort   `json:"ports,omitempty"`
 	Resources    ContainerResource `json:"resources,omitempty"`
 }
 
@@ -194,6 +202,18 @@ func podToInfo(pod *corev1.Pod, detailed bool) PodInfo {
 		}
 	}
 
+	// Always collect ports from all containers for port forwarding
+	var ports []ContainerPort
+	for _, c := range pod.Spec.Containers {
+		for _, p := range c.Ports {
+			ports = append(ports, ContainerPort{
+				Name:          p.Name,
+				ContainerPort: p.ContainerPort,
+				Protocol:      string(p.Protocol),
+			})
+		}
+	}
+
 	info := PodInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
@@ -203,6 +223,7 @@ func podToInfo(pod *corev1.Pod, detailed bool) PodInfo {
 		Age:       formatAge(pod.CreationTimestamp.Time),
 		Node:      pod.Spec.NodeName,
 		IP:        pod.Status.PodIP,
+		Ports:     ports,
 	}
 
 	if detailed {
@@ -345,12 +366,22 @@ func podToInfoWithMetrics(pod *corev1.Pod, metrics map[string]ContainerResource)
 			}
 		}
 
+		// Get ports from container spec
+		var ports []ContainerPort
+		for _, p := range spec.Ports {
+			ports = append(ports, ContainerPort{
+				Name:          p.Name,
+				ContainerPort: p.ContainerPort,
+				Protocol:      string(p.Protocol),
+			})
+		}
 		containers = append(containers, ContainerInfo{
 			Name:         cs.Name,
 			Image:        cs.Image,
 			Ready:        cs.Ready,
 			RestartCount: cs.RestartCount,
 			State:        state,
+			Ports:        ports,
 			Resources:    resources,
 		})
 	}
