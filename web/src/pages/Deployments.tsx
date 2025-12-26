@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 interface DeploymentsProps {
   namespace?: string;
@@ -76,6 +77,8 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
   const { addToast } = useToast();
   const [scaleDeployment, setScaleDeployment] = useState<DeploymentInfo | null>(null);
   const [yamlDeployment, setYamlDeployment] = useState<DeploymentInfo | null>(null);
+  const [restartTarget, setRestartTarget] = useState<DeploymentInfo | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeploymentInfo | null>(null);
 
   const { data: deployments, isLoading, error } = useQuery({
     queryKey: ['deployments', namespace],
@@ -166,11 +169,7 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                       {
                         label: 'Restart',
                         icon: <RotateCcw className="w-4 h-4" />,
-                        onClick: () => {
-                          if (confirm(`Restart deployment ${dep.name}?`)) {
-                            restartMutation.mutate({ ns: dep.namespace, name: dep.name });
-                          }
-                        },
+                        onClick: () => setRestartTarget(dep),
                       },
                       {
                         label: 'View YAML',
@@ -181,11 +180,7 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
-                        onClick: () => {
-                          if (confirm(`Delete deployment ${dep.name}?`)) {
-                            deleteMutation.mutate({ ns: dep.namespace, name: dep.name });
-                          }
-                        },
+                        onClick: () => setDeleteTarget(dep),
                       },
                     ]}
                   />
@@ -214,6 +209,42 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
           onClose={() => setYamlDeployment(null)}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={!!restartTarget}
+        title="Restart Deployment"
+        message={`Are you sure you want to restart deployment "${restartTarget?.name}"? This will trigger a rolling update.`}
+        confirmLabel="Restart"
+        variant="warning"
+        isLoading={restartMutation.isPending}
+        onConfirm={() => {
+          if (restartTarget) {
+            restartMutation.mutate(
+              { ns: restartTarget.namespace, name: restartTarget.name },
+              { onSettled: () => setRestartTarget(null) }
+            );
+          }
+        }}
+        onCancel={() => setRestartTarget(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete Deployment"
+        message={`Are you sure you want to delete deployment "${deleteTarget?.name}"? This will also delete all associated pods.`}
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteMutation.mutate(
+              { ns: deleteTarget.namespace, name: deleteTarget.name },
+              { onSettled: () => setDeleteTarget(null) }
+            );
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

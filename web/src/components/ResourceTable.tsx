@@ -2,6 +2,7 @@ import { RefreshCw, FileCode, Trash2, Search, ChevronUp, ChevronDown, ChevronsUp
 import { useState, useMemo } from 'react';
 import { YamlModal } from './YamlModal';
 import { ActionMenu } from './ActionMenu';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Column<T> {
   key: string;
@@ -49,6 +50,7 @@ export function ResourceTable<T>({
   const [searchTerm, setSearchTerm] = useState('');
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [deleteTarget, setDeleteTarget] = useState<T | null>(null);
 
   const handleSort = (columnKey: string) => {
     if (sortColumn === columnKey) {
@@ -221,12 +223,7 @@ export function ResourceTable<T>({
                             icon: <Trash2 className="w-4 h-4" />,
                             variant: 'danger' as const,
                             disabled: !canDelete,
-                            onClick: () => {
-                              const info = getResourceInfo(item);
-                              if (confirm(`Delete ${resourceType.slice(0, -1)} ${info.name}?`)) {
-                                onDelete(item);
-                              }
-                            },
+                            onClick: () => setDeleteTarget(item),
                           }] : []),
                         ]}
                       />
@@ -259,6 +256,21 @@ export function ResourceTable<T>({
           namespace={yamlResource.namespace}
           name={yamlResource.name}
           onClose={() => setYamlResource(null)}
+        />
+      )}
+
+      {deleteTarget && getResourceInfo && onDelete && (
+        <ConfirmDialog
+          isOpen={!!deleteTarget}
+          title={`Delete ${resourceType ? resourceType.slice(0, -1).charAt(0).toUpperCase() + resourceType.slice(1, -1) : 'Resource'}`}
+          message={`Are you sure you want to delete "${getResourceInfo(deleteTarget).name}"? This action cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={() => {
+            onDelete(deleteTarget);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

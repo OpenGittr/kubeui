@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 // Container resource usage bar with request/limit/usage visualization
 function ContainerResourceBar({
@@ -432,6 +433,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   const [logPod, setLogPod] = useState<PodInfo | null>(null);
   const [yamlPod, setYamlPod] = useState<PodInfo | null>(null);
   const [selectedPod, setSelectedPod] = useState<PodInfo | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PodInfo | null>(null);
 
   const { data: pods, isLoading, error } = useQuery({
     queryKey: ['pods', namespace],
@@ -533,11 +535,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
-                        onClick: () => {
-                          if (confirm(`Delete pod ${pod.name}?`)) {
-                            deleteMutation.mutate({ ns: pod.namespace, name: pod.name });
-                          }
-                        },
+                        onClick: () => setDeleteTarget(pod),
                       },
                     ]}
                   />
@@ -573,6 +571,24 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
           }}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete Pod"
+        message={`Are you sure you want to delete pod "${deleteTarget?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteMutation.mutate(
+              { ns: deleteTarget.namespace, name: deleteTarget.name },
+              { onSettled: () => setDeleteTarget(null) }
+            );
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
