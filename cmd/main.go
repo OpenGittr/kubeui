@@ -24,7 +24,7 @@ import (
 var staticFiles embed.FS
 
 var (
-	version   = "0.1.1"
+	version   = "0.1.3"
 	port      = flag.String("port", "8080", "Port to run the server on")
 	noBrowser = flag.Bool("no-browser", false, "Don't open browser on start")
 )
