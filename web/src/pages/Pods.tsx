@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { PodInfo, ContainerResource } from '../services/api';
-import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause } from 'lucide-react';
+import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { TerminalModal } from '../components/TerminalModal';
 
 // Container resource usage bar with request/limit/usage visualization
 function ContainerResourceBar({
@@ -434,6 +435,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   const [yamlPod, setYamlPod] = useState<PodInfo | null>(null);
   const [selectedPod, setSelectedPod] = useState<PodInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PodInfo | null>(null);
+  const [terminalPod, setTerminalPod] = useState<PodInfo | null>(null);
 
   const { data: pods, isLoading, error } = useQuery({
     queryKey: ['pods', namespace],
@@ -522,6 +524,11 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
                         onClick: () => setSelectedPod(pod),
                       },
                       {
+                        label: 'Shell',
+                        icon: <Terminal className="w-4 h-4" />,
+                        onClick: () => setTerminalPod(pod),
+                      },
+                      {
                         label: 'Logs',
                         icon: <FileText className="w-4 h-4" />,
                         onClick: () => setLogPod(pod),
@@ -589,6 +596,14 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
         }}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {terminalPod && (
+        <TerminalModal
+          namespace={terminalPod.namespace}
+          podName={terminalPod.name}
+          onClose={() => setTerminalPod(null)}
+        />
+      )}
     </div>
   );
 }

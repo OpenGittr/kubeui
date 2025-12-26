@@ -67,6 +67,12 @@ func main() {
 	// Initialize SSE handler early for middleware
 	sseHandler := handler.NewSSEHandler(k8sManager)
 
+	// Initialize exec handler for WebSocket
+	execHandler := handler.NewExecHandler(k8sManager)
+
+	// Add exec middleware for WebSocket terminal
+	app.UseMiddleware(execHandler.Middleware)
+
 	// Add SSE middleware for streaming
 	app.UseMiddleware(sseHandler.SSEMiddleware)
 
