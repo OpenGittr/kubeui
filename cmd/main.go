@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +24,7 @@ import (
 var staticFiles embed.FS
 
 var (
-	version   = "0.1.0"
+	version   = "0.1.1"
 	port      = flag.String("port", "8080", "Port to run the server on")
 	noBrowser = flag.Bool("no-browser", false, "Don't open browser on start")
 )
@@ -35,7 +38,17 @@ func main() {
 		return
 	}
 
+	// Find available ports
+	availablePort := findAvailablePort(*port)
+	metricsPort := findAvailablePort("2121")
+
+	// Set environment variables for GoFr
+	os.Setenv("HTTP_PORT", availablePort)
+	os.Setenv("METRICS_PORT", metricsPort)
+
 	app := gofr.New()
+
+	app.Logger().Infof("Starting KubeUI on http://localhost:%s", availablePort)
 
 	// Initialize Kubernetes client manager
 	k8sManager, err := service.NewK8sManager()
@@ -186,10 +199,9 @@ func main() {
 
 	// Open browser if not disabled
 	if !*noBrowser {
-		go openBrowser(fmt.Sprintf("http://localhost:%s", *port))
+		go openBrowser(fmt.Sprintf("http://localhost:%s", availablePort))
 	}
 
-	app.Logger().Infof("Starting KubeUI on http://localhost:%s", *port)
 	app.Run()
 }
 
@@ -295,4 +307,23 @@ func isNewerVersion(latest, current string) bool {
 	}
 
 	return latest > current
+}
+
+// findAvailablePort finds an available port starting from the given port
+func findAvailablePort(startPort string) string {
+	port, err := strconv.Atoi(startPort)
+	if err != nil {
+		port = 8080
+	}
+
+	for i := 0; i < 100; i++ {
+		addr := fmt.Sprintf(":%d", port+i)
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			listener.Close()
+			return strconv.Itoa(port + i)
+		}
+	}
+
+	return startPort
 }
