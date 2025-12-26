@@ -1,0 +1,38 @@
+version: 2
+
+builds:
+  - main: ./cmd
+    binary: kubeui
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+brews:
+  - repository:
+      owner: opengittr
+      name: homebrew-tap
+    homepage: "https://github.com/opengittr/kubeui"
+    description: "Kubernetes monitoring and management UI"
+    install: |
+      bin.install "kubeui"

@@ -1,0 +1,33 @@
+# Build artifacts
+bin/
+cmd/dist/
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Local configs
+configs/.local.env
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Logs
+*.log
+
+# OS files
+Thumbs.db
