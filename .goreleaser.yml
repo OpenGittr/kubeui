@@ -32,7 +32,9 @@ brews:
   - repository:
       owner: opengittr
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/opengittr/kubeui"
     description: "Kubernetes monitoring and management UI"
+    license: "MIT"
     install: |
       bin.install "kubeui"
