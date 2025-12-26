@@ -83,12 +83,14 @@ func (h *EventHandler) List(ctx *gofr.Context) (interface{}, error) {
 
 // WarningEventGroup represents a group of similar warning events
 type WarningEventGroup struct {
-	Reason    string `json:"reason"`
-	Object    string `json:"object"`
-	Message   string `json:"message"`
-	Count     int32  `json:"count"`
-	Namespace string `json:"namespace"`
-	LastSeen  string `json:"lastSeen"`
+	Reason     string `json:"reason"`
+	Object     string `json:"object"`
+	ObjectKind string `json:"objectKind"`
+	ObjectName string `json:"objectName"`
+	Message    string `json:"message"`
+	Count      int32  `json:"count"`
+	Namespace  string `json:"namespace"`
+	LastSeen   string `json:"lastSeen"`
 }
 
 // ListWarnings returns warning events from the last 24h, grouped and deduplicated
@@ -128,7 +130,8 @@ func (h *EventHandler) ListWarnings(ctx *gofr.Context) (interface{}, error) {
 		}
 
 		object := fmt.Sprintf("%s/%s", event.InvolvedObject.Kind, event.InvolvedObject.Name)
-		key := fmt.Sprintf("%s|%s|%s", event.Reason, object, event.Message)
+		// Include namespace in key to avoid grouping same-named resources from different namespaces
+		key := fmt.Sprintf("%s|%s|%s|%s", event.Namespace, event.Reason, object, event.Message)
 
 		if existing, ok := groups[key]; ok {
 			existing.Count += event.Count
@@ -145,12 +148,14 @@ func (h *EventHandler) ListWarnings(ctx *gofr.Context) (interface{}, error) {
 				count = 1
 			}
 			groups[key] = &WarningEventGroup{
-				Reason:    event.Reason,
-				Object:    object,
-				Message:   event.Message,
-				Count:     count,
-				Namespace: event.Namespace,
-				LastSeen:  formatAge(eventTime),
+				Reason:     event.Reason,
+				Object:     object,
+				ObjectKind: event.InvolvedObject.Kind,
+				ObjectName: event.InvolvedObject.Name,
+				Message:    event.Message,
+				Count:      count,
+				Namespace:  event.Namespace,
+				LastSeen:   formatAge(eventTime),
 			}
 		}
 	}

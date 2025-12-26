@@ -19,5 +19,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Allow setState in effects for syncing with external state
+      'react-hooks/set-state-in-effect': 'off',
+      // Allow hooks to be exported alongside components
+      'react-refresh/only-export-components': ['warn', { allowExportNames: ['useToast'] }],
+    },
   },
 ])

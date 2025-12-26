@@ -276,6 +276,8 @@ export interface PodEvent {
 export interface WarningEventGroup {
   reason: string;
   object: string;
+  objectKind: string;
+  objectName: string;
   message: string;
   count: number;
   namespace: string;
@@ -498,6 +500,15 @@ export const api = {
 
   version: {
     check: () => request<VersionInfo>('/version'),
+  },
+
+  github: {
+    getStars: async (): Promise<number> => {
+      const res = await fetch('https://api.github.com/repos/opengittr/kubeui');
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return data.stargazers_count || 0;
+    },
   },
 };
 

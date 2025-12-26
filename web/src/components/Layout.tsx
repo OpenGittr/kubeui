@@ -8,7 +8,6 @@ import { api } from '../services/api';
 import {
   Box,
   Server,
-  Database,
   Network,
   Settings,
   Layers,
@@ -28,6 +27,9 @@ import {
   Gauge,
   Search,
   X,
+  Github,
+  Bug,
+  Star,
 } from 'lucide-react';
 
 interface NavItem {
@@ -182,6 +184,20 @@ export function Layout({
     enabled: searchOpen && debouncedQuery.length >= 2,
   });
 
+  // Fetch version info
+  const { data: versionInfo } = useQuery({
+    queryKey: ['version'],
+    queryFn: api.version.check,
+    staleTime: 60 * 60 * 1000, // 1 hour
+  });
+
+  // Fetch GitHub stars
+  const { data: starCount } = useQuery({
+    queryKey: ['github-stars'],
+    queryFn: api.github.getStars,
+    staleTime: 60 * 60 * 1000, // 1 hour
+  });
+
   // Filter nav items for quick navigation
   const filteredNavItems = useMemo(() => {
     if (!searchQuery) return navSearchItems;
@@ -223,10 +239,10 @@ export function Layout({
     <div className="flex h-screen">
       {/* Sidebar */}
       <aside className="w-56 bg-gray-900 text-gray-100 flex flex-col">
-        <div className="p-4 border-b border-gray-800">
+        <div className="h-14 px-4 border-b border-gray-800 flex items-center">
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <Database className="w-6 h-6 text-blue-400" />
-            KOps
+            <img src="/kubeui.svg" alt="KubeUI" className="w-7 h-7" />
+            KubeUI
           </h1>
         </div>
 
@@ -257,6 +273,50 @@ export function Layout({
               })}
             </div>
           ))}
+
+          {/* Sidebar Footer - inside scroll area */}
+          <div className="mt-6 pt-3 border-t border-gray-800 text-xs">
+            <div className="flex items-center justify-between text-gray-500 px-1">
+              <div className="flex items-center gap-3">
+                <a
+                  href="https://github.com/opengittr/kubeui"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-gray-300 transition-colors"
+                >
+                  <Github className="w-3.5 h-3.5" />
+                  <span className="flex items-center gap-0.5">
+                    <Star className="w-3 h-3 text-yellow-500" />
+                    {starCount ?? '—'}
+                  </span>
+                </a>
+                <a
+                  href="https://github.com/opengittr/kubeui/issues/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-gray-300 transition-colors"
+                  title="Report Issue"
+                >
+                  <Bug className="w-3.5 h-3.5" />
+                </a>
+              </div>
+              {versionInfo && (
+                <span className="text-gray-600">
+                  v{versionInfo.current}
+                  {versionInfo.updateAvailable && (
+                    <a
+                      href={versionInfo.releaseUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-1 text-blue-400 hover:text-blue-300"
+                    >
+                      ↑
+                    </a>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
         </nav>
       </aside>
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background -->
+  <rect width="64" height="64" rx="14" fill="#326CE5"/>
+
+  <!-- Isometric cube -->
+  <!-- Top face -->
+  <path d="M32 14 L50 24 L32 34 L14 24 Z" fill="white"/>
+  <!-- Left face -->
+  <path d="M14 24 L32 34 L32 52 L14 42 Z" fill="white" opacity="0.7"/>
+  <!-- Right face -->
+  <path d="M50 24 L32 34 L32 52 L50 42 Z" fill="white" opacity="0.85"/>
+</svg>

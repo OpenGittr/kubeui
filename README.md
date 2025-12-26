@@ -1,6 +1,13 @@
-# KubeUI - Kubernetes Dashboard
+<p align="center">
+  <img src="web/public/kubeui.svg" alt="KubeUI" width="80" height="80">
+</p>
 
-A lightweight, local-first Kubernetes monitoring and management UI. Single binary, no installation hassle.
+<h1 align="center">KubeUI</h1>
+
+<p align="center">
+  A lightweight, local-first Kubernetes monitoring and management UI.<br>
+  Single binary, no installation hassle.
+</p>
 
 ## Features
 

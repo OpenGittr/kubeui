@@ -71,7 +71,6 @@ function AppContent() {
   // Update cluster status based on namespace query result
   useEffect(() => {
     if (!currentCluster?.context || namespacesLoading) return;
-
     setClusterStatuses((prev) => ({
       ...prev,
       [currentCluster.context]: namespacesError ? 'failed' : 'connected',

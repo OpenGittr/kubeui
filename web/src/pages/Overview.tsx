@@ -1,9 +1,28 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { WarningEventGroup } from '../services/api';
 import { Server, Layers, AlertCircle, CheckCircle, ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react';
 import { useSummary } from '../hooks/useRealTimeUpdates';
+
+// Map Kubernetes object kinds to their route paths
+const kindToRoute: Record<string, string> = {
+  Pod: '/pods',
+  Deployment: '/deployments',
+  Service: '/services',
+  ConfigMap: '/configmaps',
+  Secret: '/secrets',
+  Job: '/jobs',
+  CronJob: '/jobs',
+  DaemonSet: '/daemonsets',
+  StatefulSet: '/statefulsets',
+  ReplicaSet: '/replicasets',
+  Ingress: '/ingresses',
+  PersistentVolumeClaim: '/storage',
+  HorizontalPodAutoscaler: '/hpa',
+  Node: '/nodes',
+};
 
 interface OverviewProps {
   namespace?: string;
@@ -196,34 +215,48 @@ export function Overview({ namespace, isConnected = true }: OverviewProps) {
                   <th className="pb-2 pr-4 w-16">Count</th>
                   <th className="pb-2 pr-4">Reason</th>
                   <th className="pb-2 pr-4">Object</th>
+                  <th className="pb-2 pr-4">Namespace</th>
                   <th className="pb-2 pr-4">Message</th>
                   <th className="pb-2 w-20">Last Seen</th>
                 </tr>
               </thead>
               <tbody>
-                {warningEvents.map((event, idx) => (
-                  <tr key={`${event.namespace}/${event.object}/${event.reason}/${idx}`} className="border-b border-gray-50">
-                    <td className="py-2 pr-4">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        event.count > 10 ? 'bg-red-100 text-red-800' :
-                        event.count > 3 ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {event.count}x
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4 font-medium">{event.reason}</td>
-                    <td className="py-2 pr-4">
-                      <span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                        {event.object}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      <ExpandableMessage event={event} />
-                    </td>
-                    <td className="py-2 text-gray-500 text-xs">{event.lastSeen}</td>
-                  </tr>
-                ))}
+                {warningEvents.map((event, idx) => {
+                  const route = kindToRoute[event.objectKind];
+                  return (
+                    <tr key={`${event.namespace}/${event.object}/${event.reason}/${idx}`} className="border-b border-gray-50">
+                      <td className="py-2 pr-4">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          event.count > 10 ? 'bg-red-100 text-red-800' :
+                          event.count > 3 ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {event.count}x
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 font-medium">{event.reason}</td>
+                      <td className="py-2 pr-4">
+                        {route ? (
+                          <Link
+                            to={route}
+                            className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs font-mono transition-colors"
+                          >
+                            {event.object}
+                          </Link>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
+                            {event.object}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 text-gray-500 text-xs">{event.namespace}</td>
+                      <td className="py-2 pr-4 text-gray-600">
+                        <ExpandableMessage event={event} />
+                      </td>
+                      <td className="py-2 text-gray-500 text-xs">{event.lastSeen}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

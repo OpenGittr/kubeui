@@ -30,7 +30,7 @@ export function useDocumentTitle() {
   const location = useLocation();
 
   useEffect(() => {
-    const pageTitle = pageTitles[location.pathname] || 'KOps';
-    document.title = pageTitle === 'Overview' ? 'KOps' : `${pageTitle} - KOps`;
+    const pageTitle = pageTitles[location.pathname] || 'KubeUI';
+    document.title = pageTitle === 'Overview' ? 'KubeUI' : `${pageTitle} - KubeUI`;
   }, [location.pathname]);
 }
