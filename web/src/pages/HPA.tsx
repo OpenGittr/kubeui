@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, X, ChevronRight, Info, TrendingUp, TrendingDown, A
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import { MetadataTabs } from '../components/MetadataTabs';
 
 interface HPAProps {
   namespace?: string;
@@ -162,7 +163,7 @@ function HPADetailsPanel({
                     <span className="font-medium text-sm">Scale Up</span>
                   </div>
                   <div className="text-xs text-gray-600 space-y-1">
-                    {details.scaleUpBehavior.stabilizationWindowSeconds > 0 && (
+                    {(details.scaleUpBehavior.stabilizationWindowSeconds ?? 0) > 0 && (
                       <div>Stabilization: {details.scaleUpBehavior.stabilizationWindowSeconds}s</div>
                     )}
                     {details.scaleUpBehavior.selectPolicy && (
@@ -178,7 +179,7 @@ function HPADetailsPanel({
                     <span className="font-medium text-sm">Scale Down</span>
                   </div>
                   <div className="text-xs text-gray-600 space-y-1">
-                    {details.scaleDownBehavior.stabilizationWindowSeconds > 0 && (
+                    {(details.scaleDownBehavior.stabilizationWindowSeconds ?? 0) > 0 && (
                       <div>Stabilization: {details.scaleDownBehavior.stabilizationWindowSeconds}s</div>
                     )}
                     {details.scaleDownBehavior.selectPolicy && (
@@ -217,18 +218,11 @@ function HPADetailsPanel({
         )}
 
         {/* Labels */}
-        {details.labels && Object.keys(details.labels).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(details.labels).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <MetadataTabs
+          tabs={[
+            { key: 'labels', label: 'Labels', data: details.labels },
+          ]}
+        />
 
         {/* Events */}
         <div>

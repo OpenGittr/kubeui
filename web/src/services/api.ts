@@ -74,6 +74,13 @@ export interface ContainerInfo {
   state: string;
   ports?: ContainerPort[];
   resources?: ContainerResource;
+  env?: EnvVar[];
+}
+
+export interface EnvVar {
+  name: string;
+  value?: string;
+  valueFrom?: string; // "configmap:name/key", "secret:name/key", "field:path"
 }
 
 export interface DeploymentInfo {
@@ -111,6 +118,7 @@ export interface DeploymentContainer {
   cpu: DeploymentResourceUsage;
   memory: DeploymentResourceUsage;
   ports?: DeploymentContainerPort[];
+  env?: EnvVar[];
 }
 
 export interface DeploymentResourceUsage {
@@ -205,6 +213,7 @@ export interface SecretInfo {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   keySizes?: Record<string, number>;
+  data?: Record<string, string>;
 }
 
 export interface SecretEvent {

@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -58,6 +59,7 @@ type DeploymentContainer struct {
 	CPU    ResourceUsage             `json:"cpu"`
 	Memory ResourceUsage             `json:"memory"`
 	Ports  []DeploymentContainerPort `json:"ports,omitempty"`
+	Env    []EnvVar                  `json:"env,omitempty"`
 }
 
 // ResourceUsage is defined in pods.go
@@ -121,7 +123,7 @@ func (h *DeploymentHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		runningContainers = h.fetchRunningContainers(namespace, deployment.Spec.Selector.MatchLabels)
 	}
 
-	return deploymentToInfoWithRunningContainers(deployment, runningContainers), nil
+	return deploymentToInfoWithRunningContainers(deployment, runningContainers, client, namespace), nil
 }
 
 // fetchRunningContainers gets all running container instances from pods matching the selector
@@ -351,10 +353,10 @@ func (h *DeploymentHandler) Events(ctx *gofr.Context) (interface{}, error) {
 }
 
 func deploymentToInfo(d *appsv1.Deployment, detailed bool) DeploymentInfo {
-	return deploymentToInfoWithRunningContainers(d, nil)
+	return deploymentToInfoWithRunningContainers(d, nil, nil, "")
 }
 
-func deploymentToInfoWithRunningContainers(d *appsv1.Deployment, runningContainers []RunningContainer) DeploymentInfo {
+func deploymentToInfoWithRunningContainers(d *appsv1.Deployment, runningContainers []RunningContainer, client kubernetes.Interface, namespace string) DeploymentInfo {
 	replicas := int32(0)
 	if d.Spec.Replicas != nil {
 		replicas = *d.Spec.Replicas
@@ -410,6 +412,96 @@ func deploymentToInfoWithRunningContainers(d *appsv1.Deployment, runningContaine
 				ContainerPort: p.ContainerPort,
 				Protocol:      string(p.Protocol),
 			})
+		}
+
+		// Parse envFrom (configmaps and secrets loaded in bulk)
+		for _, ef := range c.EnvFrom {
+			if ef.ConfigMapRef != nil {
+				prefix := ef.Prefix
+				cmName := ef.ConfigMapRef.Name
+				// Try to fetch the ConfigMap and expand keys with values
+				if client != nil && namespace != "" {
+					cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), cmName, metav1.GetOptions{})
+					if err == nil {
+						for key, value := range cm.Data {
+							container.Env = append(container.Env, EnvVar{
+								Name:      prefix + key,
+								Value:     value,
+								ValueFrom: fmt.Sprintf("configmap:%s/%s", cmName, key),
+							})
+						}
+						continue
+					}
+				}
+				// Fallback if can't fetch ConfigMap
+				container.Env = append(container.Env, EnvVar{
+					Name:      fmt.Sprintf("%s* (all keys)", prefix),
+					ValueFrom: fmt.Sprintf("configmap:%s", cmName),
+				})
+			} else if ef.SecretRef != nil {
+				prefix := ef.Prefix
+				secretName := ef.SecretRef.Name
+				// Try to fetch the Secret and expand keys with values
+				if client != nil && namespace != "" {
+					secret, err := client.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+					if err == nil {
+						for key, value := range secret.Data {
+							container.Env = append(container.Env, EnvVar{
+								Name:      prefix + key,
+								Value:     string(value),
+								ValueFrom: fmt.Sprintf("secret:%s/%s", secretName, key),
+							})
+						}
+						continue
+					}
+				}
+				// Fallback if can't fetch Secret
+				container.Env = append(container.Env, EnvVar{
+					Name:      fmt.Sprintf("%s* (all keys)", prefix),
+					ValueFrom: fmt.Sprintf("secret:%s", secretName),
+				})
+			}
+		}
+
+		// Parse environment variables
+		for _, e := range c.Env {
+			ev := EnvVar{Name: e.Name}
+			if e.Value != "" {
+				ev.Value = e.Value
+			} else if e.ValueFrom != nil {
+				if e.ValueFrom.ConfigMapKeyRef != nil {
+					cmName := e.ValueFrom.ConfigMapKeyRef.Name
+					cmKey := e.ValueFrom.ConfigMapKeyRef.Key
+					ev.ValueFrom = fmt.Sprintf("configmap:%s/%s", cmName, cmKey)
+					// Fetch actual value from ConfigMap
+					if client != nil && namespace != "" {
+						cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), cmName, metav1.GetOptions{})
+						if err == nil {
+							if val, ok := cm.Data[cmKey]; ok {
+								ev.Value = val
+							}
+						}
+					}
+				} else if e.ValueFrom.SecretKeyRef != nil {
+					secretName := e.ValueFrom.SecretKeyRef.Name
+					secretKey := e.ValueFrom.SecretKeyRef.Key
+					ev.ValueFrom = fmt.Sprintf("secret:%s/%s", secretName, secretKey)
+					// Fetch actual value from Secret
+					if client != nil && namespace != "" {
+						secret, err := client.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+						if err == nil {
+							if val, ok := secret.Data[secretKey]; ok {
+								ev.Value = string(val)
+							}
+						}
+					}
+				} else if e.ValueFrom.FieldRef != nil {
+					ev.ValueFrom = fmt.Sprintf("field:%s", e.ValueFrom.FieldRef.FieldPath)
+				} else if e.ValueFrom.ResourceFieldRef != nil {
+					ev.ValueFrom = fmt.Sprintf("resource:%s", e.ValueFrom.ResourceFieldRef.Resource)
+				}
+			}
+			container.Env = append(container.Env, ev)
 		}
 
 		info.ContainerDetails = append(info.ContainerDetails, container)

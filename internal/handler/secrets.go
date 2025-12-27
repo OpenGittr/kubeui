@@ -27,6 +27,7 @@ type SecretInfo struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 	KeySizes    map[string]int    `json:"keySizes,omitempty"`
+	Data        map[string]string `json:"data,omitempty"` // Decoded secret values
 }
 
 func (h *SecretHandler) List(ctx *gofr.Context) (interface{}, error) {
@@ -77,9 +78,11 @@ func (h *SecretHandler) Get(ctx *gofr.Context) (interface{}, error) {
 
 	keys := make([]string, 0, len(secret.Data))
 	keySizes := make(map[string]int)
+	data := make(map[string]string)
 	for k, v := range secret.Data {
 		keys = append(keys, k)
 		keySizes[k] = len(v)
+		data[k] = string(v) // Decode from bytes to string
 	}
 
 	return SecretInfo{
@@ -91,6 +94,7 @@ func (h *SecretHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		Labels:      secret.Labels,
 		Annotations: secret.Annotations,
 		KeySizes:    keySizes,
+		Data:        data,
 	}, nil
 }
 

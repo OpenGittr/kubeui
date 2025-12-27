@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { SecretInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Key, Lock, Shield } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Lock } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { MetadataTabs } from '../components/MetadataTabs';
 
 interface SecretsProps {
   namespace?: string;
@@ -112,77 +113,17 @@ function SecretDetailsPanel({
           )}
         </div>
 
-        {/* Security Notice */}
-        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 flex items-start gap-2">
-          <Shield className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-yellow-800">
-            <span className="font-medium">Security Notice:</span> Secret values are not displayed in the UI for security reasons.
-            Use <code className="bg-yellow-100 px-1 rounded">kubectl</code> or the YAML view to see decoded values.
-          </div>
-        </div>
-
-        {/* Data Keys */}
+        {/* Data, Labels & Annotations */}
         {detailsLoading ? (
           <p className="text-gray-500 text-sm">Loading...</p>
-        ) : secret.keys.length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-              <Key className="w-4 h-4" />
-              Data Keys ({secret.keys.length})
-            </h3>
-            <div className="border rounded overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left px-3 py-2 text-xs text-gray-500">Key</th>
-                    <th className="text-right px-3 py-2 text-xs text-gray-500">Size</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {secret.keys.map((key) => (
-                    <tr key={key}>
-                      <td className="px-3 py-2 font-mono">{key}</td>
-                      <td className="px-3 py-2 text-right text-gray-500">
-                        {details.keySizes?.[key] !== undefined
-                          ? formatBytes(details.keySizes[key])
-                          : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Labels */}
-        {details.labels && Object.keys(details.labels).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(details.labels).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Annotations */}
-        {details.annotations && Object.keys(details.annotations).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Annotations</h3>
-            <div className="space-y-1">
-              {Object.entries(details.annotations).map(([key, value]) => (
-                <div key={key} className="text-xs">
-                  <span className="font-mono text-gray-600">{key}</span>
-                  <span className="text-gray-400 mx-1">=</span>
-                  <span className="font-mono text-gray-800 break-all">{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        ) : (
+          <MetadataTabs
+            tabs={[
+              { key: 'data', label: 'Data', secretData: details.data },
+              { key: 'labels', label: 'Labels', data: details.labels },
+              { key: 'annotations', label: 'Annotations', data: details.annotations },
+            ]}
+          />
         )}
 
         {/* Events */}

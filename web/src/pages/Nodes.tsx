@@ -4,6 +4,7 @@ import type { NodeInfo, NodeResource } from '../services/api';
 import { useState } from 'react';
 import { RefreshCw, X, FileCode, ChevronRight } from 'lucide-react';
 import { YamlModal } from '../components/YamlModal';
+import { MetadataTabs } from '../components/MetadataTabs';
 
 // Formatting helpers
 function formatCPU(res: NodeResource): string {
@@ -233,18 +234,11 @@ function NodeDetailsPanel({ node, onClose, onViewYaml }: {
         </div>
 
         {/* Labels */}
-        {node.labels && Object.keys(node.labels).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(node.labels).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <MetadataTabs
+          tabs={[
+            { key: 'labels', label: 'Labels', data: node.labels },
+          ]}
+        />
       </div>
     </div>
   );

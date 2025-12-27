@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { ConfigMapInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Key, FileText, Binary } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { MetadataTabs } from '../components/MetadataTabs';
 
 interface ConfigMapsProps {
   namespace?: string;
@@ -22,8 +23,6 @@ function ConfigMapDetailsPanel({
   onClose: () => void;
   onViewYaml: () => void;
 }) {
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-
   const { data: configmapDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['configmap-details', configmap.namespace, configmap.name],
     queryFn: () => api.configmaps.get(configmap.namespace, configmap.name),
@@ -76,51 +75,10 @@ function ConfigMapDetailsPanel({
           )}
         </div>
 
-        {/* Data Keys */}
-        {detailsLoading ? (
-          <p className="text-gray-500 text-sm">Loading...</p>
-        ) : details.data && Object.keys(details.data).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-              <Key className="w-4 h-4" />
-              Data ({Object.keys(details.data).length} keys)
-            </h3>
-            <div className="space-y-2">
-              {Object.entries(details.data).map(([key, value]) => (
-                <div key={key} className="border rounded overflow-hidden">
-                  <button
-                    onClick={() => setExpandedKey(expandedKey === key ? null : key)}
-                    className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-gray-400" />
-                      <span className="font-mono text-sm">{key}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span>{value.length} bytes</span>
-                      <ChevronRight className={`w-4 h-4 transition-transform ${expandedKey === key ? 'rotate-90' : ''}`} />
-                    </div>
-                  </button>
-                  {expandedKey === key && (
-                    <div className="p-3 bg-gray-900 text-gray-100">
-                      <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
-                        {value}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Binary Keys */}
         {details.binaryKeys && details.binaryKeys.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-              <Binary className="w-4 h-4" />
-              Binary Data ({details.binaryKeys.length} keys)
-            </h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Binary Data</h3>
             <div className="flex flex-wrap gap-1">
               {details.binaryKeys.map((key) => (
                 <span key={key} className="px-2 py-1 bg-purple-50 text-purple-700 rounded text-xs font-mono">
@@ -131,35 +89,14 @@ function ConfigMapDetailsPanel({
           </div>
         )}
 
-        {/* Labels */}
-        {details.labels && Object.keys(details.labels).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(details.labels).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Annotations */}
-        {details.annotations && Object.keys(details.annotations).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Annotations</h3>
-            <div className="space-y-1">
-              {Object.entries(details.annotations).map(([key, value]) => (
-                <div key={key} className="text-xs">
-                  <span className="font-mono text-gray-600">{key}</span>
-                  <span className="text-gray-400 mx-1">=</span>
-                  <span className="font-mono text-gray-800 break-all">{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Data, Labels & Annotations Tabs */}
+        <MetadataTabs
+          tabs={[
+            { key: 'data', label: 'Data', data: details.data, multiline: true },
+            { key: 'labels', label: 'Labels', data: details.labels },
+            { key: 'annotations', label: 'Annotations', data: details.annotations },
+          ]}
+        />
 
         {/* Events */}
         <div>

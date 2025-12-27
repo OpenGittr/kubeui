@@ -8,6 +8,7 @@ import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
+import { MetadataTabs } from '../components/MetadataTabs';
 
 interface StatefulSetsProps {
   namespace?: string;
@@ -140,33 +141,13 @@ function StatefulSetDetailsPanel({
           )}
         </div>
 
-        {/* Selector */}
-        {details.selector && Object.keys(details.selector).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Selector</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(details.selector).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Labels */}
-        {details.labels && Object.keys(details.labels).length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(details.labels).map(([key, value]) => (
-                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
-                  {key}={value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Selector & Labels */}
+        <MetadataTabs
+          tabs={[
+            { key: 'selector', label: 'Selector', data: details.selector },
+            { key: 'labels', label: 'Labels', data: details.labels },
+          ]}
+        />
 
         {/* Conditions */}
         {details.conditions && details.conditions.length > 0 && (

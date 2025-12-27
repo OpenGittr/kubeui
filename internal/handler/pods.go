@@ -10,6 +10,7 @@ import (
 	"gofr.dev/pkg/gofr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	"github.com/opengittr/kubeui/internal/service"
@@ -51,6 +52,13 @@ type ContainerInfo struct {
 	State        string            `json:"state"`
 	Ports        []ContainerPort   `json:"ports,omitempty"`
 	Resources    ContainerResource `json:"resources,omitempty"`
+	Env          []EnvVar          `json:"env,omitempty"`
+}
+
+type EnvVar struct {
+	Name      string `json:"name"`
+	Value     string `json:"value,omitempty"`
+	ValueFrom string `json:"valueFrom,omitempty"` // "configmap:name/key", "secret:name/key", "field:path"
 }
 
 type ContainerResource struct {
@@ -111,7 +119,7 @@ func (h *PodHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		containerMetrics = fetchPodMetrics(metricsClient, namespace, name)
 	}
 
-	return podToInfoWithMetrics(pod, containerMetrics), nil
+	return podToInfoWithMetrics(pod, containerMetrics, client, namespace), nil
 }
 
 // Logs returns logs from a pod
@@ -318,7 +326,7 @@ func fetchPodMetrics(metricsClient *metricsv.Clientset, namespace, name string) 
 }
 
 // podToInfoWithMetrics converts a pod to PodInfo with metrics data
-func podToInfoWithMetrics(pod *corev1.Pod, metrics map[string]ContainerResource) PodInfo {
+func podToInfoWithMetrics(pod *corev1.Pod, metrics map[string]ContainerResource, client kubernetes.Interface, namespace string) PodInfo {
 	ready := 0
 	total := len(pod.Spec.Containers)
 	var restarts int32
@@ -375,6 +383,98 @@ func podToInfoWithMetrics(pod *corev1.Pod, metrics map[string]ContainerResource)
 				Protocol:      string(p.Protocol),
 			})
 		}
+
+		// Get environment variables from envFrom (configmaps and secrets loaded in bulk)
+		var envVars []EnvVar
+		for _, ef := range spec.EnvFrom {
+			if ef.ConfigMapRef != nil {
+				prefix := ef.Prefix
+				cmName := ef.ConfigMapRef.Name
+				// Try to fetch the ConfigMap and expand keys with values
+				if client != nil {
+					cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), cmName, metav1.GetOptions{})
+					if err == nil {
+						for key, value := range cm.Data {
+							envVars = append(envVars, EnvVar{
+								Name:      prefix + key,
+								Value:     value,
+								ValueFrom: fmt.Sprintf("configmap:%s/%s", cmName, key),
+							})
+						}
+						continue
+					}
+				}
+				// Fallback if can't fetch ConfigMap
+				envVars = append(envVars, EnvVar{
+					Name:      fmt.Sprintf("%s* (all keys)", prefix),
+					ValueFrom: fmt.Sprintf("configmap:%s", cmName),
+				})
+			} else if ef.SecretRef != nil {
+				prefix := ef.Prefix
+				secretName := ef.SecretRef.Name
+				// Try to fetch the Secret and expand keys with values
+				if client != nil {
+					secret, err := client.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+					if err == nil {
+						for key, value := range secret.Data {
+							envVars = append(envVars, EnvVar{
+								Name:      prefix + key,
+								Value:     string(value),
+								ValueFrom: fmt.Sprintf("secret:%s/%s", secretName, key),
+							})
+						}
+						continue
+					}
+				}
+				// Fallback if can't fetch Secret
+				envVars = append(envVars, EnvVar{
+					Name:      fmt.Sprintf("%s* (all keys)", prefix),
+					ValueFrom: fmt.Sprintf("secret:%s", secretName),
+				})
+			}
+		}
+
+		// Get environment variables
+		for _, e := range spec.Env {
+			ev := EnvVar{Name: e.Name}
+			if e.Value != "" {
+				ev.Value = e.Value
+			} else if e.ValueFrom != nil {
+				if e.ValueFrom.ConfigMapKeyRef != nil {
+					cmName := e.ValueFrom.ConfigMapKeyRef.Name
+					cmKey := e.ValueFrom.ConfigMapKeyRef.Key
+					ev.ValueFrom = fmt.Sprintf("configmap:%s/%s", cmName, cmKey)
+					// Fetch actual value from ConfigMap
+					if client != nil {
+						cm, err := client.CoreV1().ConfigMaps(namespace).Get(context.Background(), cmName, metav1.GetOptions{})
+						if err == nil {
+							if val, ok := cm.Data[cmKey]; ok {
+								ev.Value = val
+							}
+						}
+					}
+				} else if e.ValueFrom.SecretKeyRef != nil {
+					secretName := e.ValueFrom.SecretKeyRef.Name
+					secretKey := e.ValueFrom.SecretKeyRef.Key
+					ev.ValueFrom = fmt.Sprintf("secret:%s/%s", secretName, secretKey)
+					// Fetch actual value from Secret
+					if client != nil {
+						secret, err := client.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+						if err == nil {
+							if val, ok := secret.Data[secretKey]; ok {
+								ev.Value = string(val)
+							}
+						}
+					}
+				} else if e.ValueFrom.FieldRef != nil {
+					ev.ValueFrom = fmt.Sprintf("field:%s", e.ValueFrom.FieldRef.FieldPath)
+				} else if e.ValueFrom.ResourceFieldRef != nil {
+					ev.ValueFrom = fmt.Sprintf("resource:%s", e.ValueFrom.ResourceFieldRef.Resource)
+				}
+			}
+			envVars = append(envVars, ev)
+		}
+
 		containers = append(containers, ContainerInfo{
 			Name:         cs.Name,
 			Image:        cs.Image,
@@ -383,6 +483,7 @@ func podToInfoWithMetrics(pod *corev1.Pod, metrics map[string]ContainerResource)
 			State:        state,
 			Ports:        ports,
 			Resources:    resources,
+			Env:          envVars,
 		})
 	}
 
