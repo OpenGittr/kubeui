@@ -125,6 +125,7 @@ func main() {
 	// Deployment routes
 	app.GET("/api/deployments", deploymentHandler.List)
 	app.GET("/api/deployments/{namespace}/{name}", deploymentHandler.Get)
+	app.GET("/api/deployments/{namespace}/{name}/events", deploymentHandler.Events)
 	app.PATCH("/api/deployments/{namespace}/{name}/scale", deploymentHandler.Scale)
 	app.POST("/api/deployments/{namespace}/{name}/restart", deploymentHandler.Restart)
 	app.DELETE("/api/deployments/{namespace}/{name}", deploymentHandler.Delete)

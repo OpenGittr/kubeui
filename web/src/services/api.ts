@@ -86,6 +86,58 @@ export interface DeploymentInfo {
   replicas: number;
   labels?: Record<string, string>;
   containers?: string[];
+  // Detailed fields
+  strategy?: string;
+  selector?: Record<string, string>;
+  images?: string[];
+  containerDetails?: DeploymentContainer[];
+  conditions?: DeploymentCondition[];
+  runningContainers?: RunningContainer[];
+}
+
+export interface RunningContainer {
+  podName: string;
+  containerName: string;
+  ready: boolean;
+  state: string;
+  restarts: number;
+  cpu: DeploymentResourceUsage;
+  memory: DeploymentResourceUsage;
+}
+
+export interface DeploymentContainer {
+  name: string;
+  image: string;
+  cpu: DeploymentResourceUsage;
+  memory: DeploymentResourceUsage;
+  ports?: DeploymentContainerPort[];
+}
+
+export interface DeploymentResourceUsage {
+  request: number;  // CPU in millicores, Memory in bytes
+  limit: number;
+  usage: number;
+}
+
+export interface DeploymentContainerPort {
+  name?: string;
+  containerPort: number;
+  protocol: string;
+}
+
+export interface DeploymentCondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface DeploymentEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  age: string;
 }
 
 export interface ServiceInfo {
@@ -390,6 +442,8 @@ export const api = {
       request<DeploymentInfo[]>(`/deployments${namespace ? `?namespace=${namespace}` : ''}`),
     get: (namespace: string, name: string) =>
       request<DeploymentInfo>(`/deployments/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<DeploymentEvent[]>(`/deployments/${namespace}/${name}/events`),
     scale: (namespace: string, name: string, replicas: number) =>
       request<{ message: string; replicas: number }>(`/deployments/${namespace}/${name}/scale`, {
         method: 'PATCH',

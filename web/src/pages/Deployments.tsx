@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DeploymentInfo } from '../services/api';
-import { RefreshCw, RotateCcw, Scale, FileCode, Trash2 } from 'lucide-react';
+import { RefreshCw, RotateCcw, Scale, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ContainerCard, PodContainersGroup } from '../components/ContainerCard';
 
 interface DeploymentsProps {
   namespace?: string;
@@ -72,6 +73,216 @@ function ScaleModal({
   );
 }
 
+function DeploymentDetailsPanel({
+  deployment,
+  onClose,
+  onViewYaml,
+}: {
+  deployment: DeploymentInfo;
+  onClose: () => void;
+  onViewYaml: () => void;
+}) {
+  const { data: deploymentDetails, isLoading: detailsLoading } = useQuery({
+    queryKey: ['deployment-details', deployment.namespace, deployment.name],
+    queryFn: () => api.deployments.get(deployment.namespace, deployment.name),
+  });
+
+  const { data: events, isLoading: eventsLoading } = useQuery({
+    queryKey: ['deployment-events', deployment.namespace, deployment.name],
+    queryFn: () => api.deployments.events(deployment.namespace, deployment.name),
+  });
+
+  const details = deploymentDetails || deployment;
+
+  return (
+    <div className="fixed inset-y-0 right-0 w-1/2 bg-white shadow-xl z-40 flex flex-col">
+      <div className="flex justify-between items-center p-4 border-b bg-gray-50">
+        <div>
+          <h2 className="text-lg font-semibold">{deployment.name}</h2>
+          <p className="text-sm text-gray-500">{deployment.namespace}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onViewYaml}
+            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+          >
+            <FileCode className="w-4 h-4" />
+            YAML
+          </button>
+          <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto p-4 space-y-6">
+        {/* Status Overview */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Ready</div>
+            <div className="font-medium">{deployment.ready}</div>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Replicas</div>
+            <div className="font-medium">{deployment.replicas}</div>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Up-to-date</div>
+            <div className="font-medium">{deployment.upToDate}</div>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Available</div>
+            <div className="font-medium">{deployment.available}</div>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Age</div>
+            <div className="font-medium">{deployment.age}</div>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <div className="text-xs text-gray-500 uppercase">Strategy</div>
+            <div className="font-medium">{details.strategy || '-'}</div>
+          </div>
+        </div>
+
+        {/* Running Pods */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Running Pods</h3>
+          {detailsLoading ? (
+            <p className="text-gray-500 text-sm">Loading...</p>
+          ) : details.runningContainers && details.runningContainers.length > 0 ? (
+            <div className="space-y-3">
+              {/* Group containers by pod */}
+              {Object.entries(
+                details.runningContainers.reduce((acc, container) => {
+                  if (!acc[container.podName]) {
+                    acc[container.podName] = [];
+                  }
+                  acc[container.podName].push(container);
+                  return acc;
+                }, {} as Record<string, typeof details.runningContainers>)
+              ).map(([podName, containers]) => (
+                <PodContainersGroup
+                  key={podName}
+                  podName={podName}
+                  containers={containers}
+                />
+              ))}
+            </div>
+          ) : details.containerDetails && details.containerDetails.length > 0 ? (
+            <div className="space-y-2">
+              {details.containerDetails.map((container) => (
+                <ContainerCard
+                  key={container.name}
+                  name={container.name}
+                  image={container.image}
+                  ready={true}
+                  state="spec"
+                  restarts={0}
+                  resources={{
+                    cpu: container.cpu,
+                    memory: container.memory,
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">No running pods</p>
+          )}
+        </div>
+
+        {/* Selector */}
+        {details.selector && Object.keys(details.selector).length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Selector</h3>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(details.selector).map(([key, value]) => (
+                <span key={key} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono">
+                  {key}={value}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Labels */}
+        {details.labels && Object.keys(details.labels).length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Labels</h3>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(details.labels).map(([key, value]) => (
+                <span key={key} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
+                  {key}={value}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Conditions */}
+        {details.conditions && details.conditions.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Conditions</h3>
+            <div className="space-y-2">
+              {details.conditions.map((cond, idx) => (
+                <div
+                  key={idx}
+                  className={`border-l-2 pl-3 py-1 ${
+                    cond.status === 'True' ? 'border-green-400' : 'border-yellow-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${
+                      cond.status === 'True' ? 'text-green-700' : 'text-yellow-700'
+                    }`}>
+                      {cond.type}
+                    </span>
+                    <span className="text-xs text-gray-400">{cond.reason}</span>
+                  </div>
+                  <p className="text-sm text-gray-600">{cond.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Events */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Events</h3>
+          {eventsLoading ? (
+            <p className="text-gray-500 text-sm">Loading...</p>
+          ) : events && events.length > 0 ? (
+            <div className="space-y-2">
+              {events.map((event, idx) => (
+                <div
+                  key={idx}
+                  className={`border-l-2 pl-3 py-1 ${
+                    event.type === 'Warning' ? 'border-yellow-400' : 'border-green-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${
+                      event.type === 'Warning' ? 'text-yellow-700' : 'text-green-700'
+                    }`}>
+                      {event.reason}
+                    </span>
+                    {event.count > 1 && (
+                      <span className="text-xs text-gray-400">x{event.count}</span>
+                    )}
+                    <span className="text-xs text-gray-400">{event.age}</span>
+                  </div>
+                  <p className="text-sm text-gray-600">{event.message}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">No events</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Deployments({ namespace, isConnected = true }: DeploymentsProps) {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
@@ -79,6 +290,7 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
   const [yamlDeployment, setYamlDeployment] = useState<DeploymentInfo | null>(null);
   const [restartTarget, setRestartTarget] = useState<DeploymentInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeploymentInfo | null>(null);
+  const [selectedDeployment, setSelectedDeployment] = useState<DeploymentInfo | null>(null);
 
   const { data: deployments, isLoading, error } = useQuery({
     queryKey: ['deployments', namespace],
@@ -151,16 +363,30 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
           </thead>
           <tbody className="divide-y divide-gray-100">
             {deployments?.map((dep) => (
-              <tr key={`${dep.namespace}/${dep.name}`} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-sm font-medium">{dep.name}</td>
+              <tr
+                key={`${dep.namespace}/${dep.name}`}
+                className={`hover:bg-gray-50 cursor-pointer ${selectedDeployment?.name === dep.name && selectedDeployment?.namespace === dep.namespace ? 'bg-blue-50' : ''}`}
+                onClick={() => setSelectedDeployment(dep)}
+              >
+                <td className="px-4 py-3 text-sm font-medium">
+                  <div className="flex items-center gap-1">
+                    {dep.name}
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-sm text-gray-600">{dep.namespace}</td>
                 <td className="px-4 py-3 text-sm">{dep.ready}</td>
                 <td className="px-4 py-3 text-sm">{dep.upToDate}</td>
                 <td className="px-4 py-3 text-sm">{dep.available}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{dep.age}</td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <ActionMenu
                     items={[
+                      {
+                        label: 'Details',
+                        icon: <Info className="w-4 h-4" />,
+                        onClick: () => setSelectedDeployment(dep),
+                      },
                       {
                         label: 'Scale',
                         icon: <Scale className="w-4 h-4" />,
@@ -245,6 +471,16 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
         }}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {selectedDeployment && (
+        <DeploymentDetailsPanel
+          deployment={selectedDeployment}
+          onClose={() => setSelectedDeployment(null)}
+          onViewYaml={() => {
+            setYamlDeployment(selectedDeployment);
+          }}
+        />
+      )}
     </div>
   );
 }

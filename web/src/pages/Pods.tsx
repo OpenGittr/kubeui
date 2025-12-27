@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
-import type { PodInfo, ContainerResource } from '../services/api';
+import type { PodInfo } from '../services/api';
 import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal, Plug } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
@@ -9,121 +9,7 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TerminalModal } from '../components/TerminalModal';
 import { PortForwardModal } from '../components/PortForwardModal';
-
-// Container resource usage bar with request/limit/usage visualization
-function ContainerResourceBar({
-  label,
-  usage,
-  request,
-  limit,
-  formatValue
-}: {
-  label: string;
-  usage: number;
-  request: number;
-  limit: number;
-  formatValue: (v: number) => string;
-}) {
-  // Scale bar to limit (if set), otherwise request, otherwise usage
-  const maxValue = limit > 0 ? limit : (request > 0 ? request * 1.5 : usage * 1.5);
-  const usagePercent = maxValue > 0 ? (usage / maxValue) * 100 : 0;
-  const requestPercent = maxValue > 0 && request > 0 ? (request / maxValue) * 100 : 0;
-
-  // Color based on usage vs request
-  const getColor = () => {
-    if (limit > 0 && usage > limit * 0.9) return 'bg-red-500';
-    if (request > 0 && usage > request) return 'bg-orange-500';
-    if (request > 0 && usage > request * 0.8) return 'bg-yellow-500';
-    return 'bg-green-500';
-  };
-
-  return (
-    <div className="space-y-0.5">
-      <div className="text-xs font-medium text-gray-600">{label}</div>
-      <div className="h-3 bg-gray-200 rounded relative">
-        {/* Usage bar */}
-        <div
-          className={`h-full ${getColor()} rounded-l transition-all flex items-center justify-end`}
-          style={{ width: `${Math.max(Math.min(usagePercent, 100), 2)}%` }}
-        >
-          {usagePercent >= 15 && (
-            <span className="text-[10px] text-white font-medium pr-1">{formatValue(usage)}</span>
-          )}
-        </div>
-        {/* Usage label outside bar if bar is too small */}
-        {usagePercent < 15 && (
-          <span
-            className="absolute top-0 h-full flex items-center text-[10px] text-gray-600 font-medium pl-1"
-            style={{ left: `${Math.max(Math.min(usagePercent, 100), 2)}%` }}
-          >
-            {formatValue(usage)}
-          </span>
-        )}
-        {/* Request marker (blue line with label) */}
-        {request > 0 && requestPercent <= 100 && (
-          <div
-            className="absolute top-0 h-full flex flex-col items-center"
-            style={{ left: `${requestPercent}%` }}
-          >
-            <div className="w-0.5 h-full bg-blue-600"></div>
-            <span className="absolute -bottom-3.5 text-[9px] text-blue-600 font-medium whitespace-nowrap -translate-x-1/2">
-              req {formatValue(request)}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-between text-[10px] text-gray-400 mt-3">
-        <span>0</span>
-        {limit > 0 && <span>limit {formatValue(limit)}</span>}
-      </div>
-      {/* Legend */}
-      <div className="flex gap-3 text-[9px] text-gray-400 mt-1">
-        <span><span className="inline-block w-2 h-2 bg-green-500 rounded-sm mr-0.5"></span>current</span>
-        {request > 0 && <span><span className="inline-block w-2 h-0.5 bg-blue-600 mr-0.5"></span>request</span>}
-        {limit > 0 && <span className="text-gray-400">|→ limit</span>}
-      </div>
-    </div>
-  );
-}
-
-function ContainerResources({ resources }: { resources?: ContainerResource }) {
-  if (!resources) return null;
-
-  const formatCPU = (m: number) => m >= 1000 ? `${(m/1000).toFixed(1)}` : `${m}m`;
-  const formatMem = (b: number) => {
-    if (b >= 1024*1024*1024) return `${(b/(1024*1024*1024)).toFixed(1)}Gi`;
-    if (b >= 1024*1024) return `${(b/(1024*1024)).toFixed(0)}Mi`;
-    return `${(b/1024).toFixed(0)}Ki`;
-  };
-
-  const hasCPU = resources.cpu.usage > 0 || resources.cpu.request > 0;
-  const hasMem = resources.memory.usage > 0 || resources.memory.request > 0;
-
-  if (!hasCPU && !hasMem) return null;
-
-  return (
-    <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-3">
-      {hasCPU && (
-        <ContainerResourceBar
-          label="CPU"
-          usage={resources.cpu.usage}
-          request={resources.cpu.request}
-          limit={resources.cpu.limit}
-          formatValue={formatCPU}
-        />
-      )}
-      {hasMem && (
-        <ContainerResourceBar
-          label="Memory"
-          usage={resources.memory.usage}
-          request={resources.memory.request}
-          limit={resources.memory.limit}
-          formatValue={formatMem}
-        />
-      )}
-    </div>
-  );
-}
+import { ContainerCard } from '../components/ContainerCard';
 
 interface PodsProps {
   namespace?: string;
@@ -356,23 +242,18 @@ function PodDetailsPanel({ pod, onClose, onViewLogs, onViewYaml }: {
           ) : podDetails?.containers && podDetails.containers.length > 0 ? (
             <div className="space-y-2">
               {podDetails.containers.map((container) => (
-                <div key={container.name} className="border rounded p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">{container.name}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      container.ready ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {container.state}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500 font-mono truncate" title={container.image}>
-                    {container.image}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Restarts: {container.restartCount}
-                  </div>
-                  <ContainerResources resources={container.resources} />
-                </div>
+                <ContainerCard
+                  key={container.name}
+                  name={container.name}
+                  image={container.image}
+                  ready={container.ready}
+                  state={container.state}
+                  restarts={container.restartCount}
+                  resources={{
+                    cpu: container.resources?.cpu || { request: 0, limit: 0, usage: 0 },
+                    memory: container.resources?.memory || { request: 0, limit: 0, usage: 0 },
+                  }}
+                />
               ))}
             </div>
           ) : (
