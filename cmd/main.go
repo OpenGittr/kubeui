@@ -132,20 +132,30 @@ func main() {
 
 	// Service routes
 	app.GET("/api/services", serviceHandler.List)
+	app.GET("/api/services/{namespace}/{name}", serviceHandler.Get)
+	app.GET("/api/services/{namespace}/{name}/events", serviceHandler.Events)
 	app.DELETE("/api/services/{namespace}/{name}", serviceHandler.Delete)
 
 	// ConfigMap routes
 	app.GET("/api/configmaps", configMapHandler.List)
 	app.GET("/api/configmaps/{namespace}/{name}", configMapHandler.Get)
+	app.GET("/api/configmaps/{namespace}/{name}/events", configMapHandler.Events)
 	app.DELETE("/api/configmaps/{namespace}/{name}", configMapHandler.Delete)
 
 	// Secret routes
 	app.GET("/api/secrets", secretHandler.List)
+	app.GET("/api/secrets/{namespace}/{name}", secretHandler.Get)
+	app.GET("/api/secrets/{namespace}/{name}/events", secretHandler.Events)
 	app.DELETE("/api/secrets/{namespace}/{name}", secretHandler.Delete)
 
 	// Job routes
 	app.GET("/api/jobs", jobHandler.ListJobs)
+	app.GET("/api/jobs/{namespace}/{name}", jobHandler.GetJob)
+	app.GET("/api/jobs/{namespace}/{name}/events", jobHandler.JobEvents)
 	app.GET("/api/cronjobs", jobHandler.ListCronJobs)
+	app.GET("/api/cronjobs/{namespace}/{name}", jobHandler.GetCronJob)
+	app.GET("/api/cronjobs/{namespace}/{name}/events", jobHandler.CronJobEvents)
+	app.GET("/api/cronjobs/{namespace}/{name}/jobs", jobHandler.CronJobJobs)
 	app.DELETE("/api/jobs/{namespace}/{name}", jobHandler.DeleteJob)
 	app.DELETE("/api/cronjobs/{namespace}/{name}", jobHandler.DeleteCronJob)
 
@@ -172,7 +182,11 @@ func main() {
 	app.GET("/api/daemonsets/{namespace}/{name}", workloadHandler.GetDaemonSet)
 	app.GET("/api/daemonsets/{namespace}/{name}/events", workloadHandler.DaemonSetEvents)
 	app.GET("/api/statefulsets", workloadHandler.ListStatefulSets)
+	app.GET("/api/statefulsets/{namespace}/{name}", workloadHandler.GetStatefulSet)
+	app.GET("/api/statefulsets/{namespace}/{name}/events", workloadHandler.StatefulSetEvents)
 	app.GET("/api/replicasets", workloadHandler.ListReplicaSets)
+	app.GET("/api/replicasets/{namespace}/{name}", workloadHandler.GetReplicaSet)
+	app.GET("/api/replicasets/{namespace}/{name}/events", workloadHandler.ReplicaSetEvents)
 	app.DELETE("/api/daemonsets/{namespace}/{name}", workloadHandler.DeleteDaemonSet)
 	app.DELETE("/api/statefulsets/{namespace}/{name}", workloadHandler.DeleteStatefulSet)
 	app.DELETE("/api/replicasets/{namespace}/{name}", workloadHandler.DeleteReplicaSet)
@@ -186,6 +200,8 @@ func main() {
 
 	// HPA routes
 	app.GET("/api/hpas", hpaHandler.List)
+	app.GET("/api/hpas/{namespace}/{name}", hpaHandler.Get)
+	app.GET("/api/hpas/{namespace}/{name}/events", hpaHandler.Events)
 
 	// Event routes
 	app.GET("/api/events", eventHandler.List)

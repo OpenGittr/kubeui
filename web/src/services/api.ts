@@ -148,12 +148,51 @@ export interface ServiceInfo {
   externalIP?: string;
   ports: string[];
   age: string;
+  labels?: Record<string, string>;
+  selector?: Record<string, string>;
+  sessionAffinity?: string;
+  portDetails?: ServicePort[];
+  endpoints?: ServiceEndpoint[];
+}
+
+export interface ServicePort {
+  name: string;
+  port: number;
+  targetPort: string;
+  nodePort?: number;
+  protocol: string;
+}
+
+export interface ServiceEndpoint {
+  ip: string;
+  nodeName?: string;
+  ready: boolean;
+}
+
+export interface ServiceEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  age: string;
 }
 
 export interface ConfigMapInfo {
   name: string;
   namespace: string;
   keys: string[];
+  age: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  data?: Record<string, string>;
+  binaryKeys?: string[];
+}
+
+export interface ConfigMapEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
   age: string;
 }
 
@@ -163,15 +202,69 @@ export interface SecretInfo {
   type: string;
   keys: string[];
   age: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  keySizes?: Record<string, number>;
+}
+
+export interface SecretEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  age: string;
 }
 
 export interface JobInfo {
   name: string;
   namespace: string;
   completions: string;
+  parallelism?: number;
   duration?: string;
   age: string;
   status: string;
+  startTime?: string;
+  completionTime?: string;
+  succeeded?: number;
+  failed?: number;
+  active?: number;
+  labels?: Record<string, string>;
+  selector?: Record<string, string>;
+  containerDetails?: JobContainer[];
+  conditions?: JobCondition[];
+  runningContainers?: JobRunningContainer[];
+}
+
+export interface JobContainer {
+  name: string;
+  image: string;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface JobCondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface JobRunningContainer {
+  podName: string;
+  containerName: string;
+  ready: boolean;
+  state: string;
+  restarts: number;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface JobEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  age: string;
 }
 
 export interface CronJobInfo {
@@ -181,6 +274,21 @@ export interface CronJobInfo {
   suspend: boolean;
   active: number;
   lastSchedule?: string;
+  age: string;
+  concurrencyPolicy?: string;
+  successfulJobsLimit?: number;
+  failedJobsLimit?: number;
+  labels?: Record<string, string>;
+  containerDetails?: JobContainer[];
+  activeJobs?: string[];
+  lastSuccessfulTime?: string;
+}
+
+export interface CronJobEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
   age: string;
 }
 
@@ -307,6 +415,47 @@ export interface StatefulSetInfo {
   namespace: string;
   ready: string;
   replicas: number;
+  readyReplicas?: number;
+  currentReplicas?: number;
+  updatedReplicas?: number;
+  age: string;
+  serviceName?: string;
+  labels?: Record<string, string>;
+  selector?: Record<string, string>;
+  containerDetails?: StatefulSetContainer[];
+  conditions?: StatefulSetCondition[];
+  runningContainers?: StatefulSetRunningContainer[];
+}
+
+export interface StatefulSetContainer {
+  name: string;
+  image: string;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface StatefulSetCondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface StatefulSetRunningContainer {
+  podName: string;
+  containerName: string;
+  ready: boolean;
+  state: string;
+  restarts: number;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface StatefulSetEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
   age: string;
 }
 
@@ -316,6 +465,45 @@ export interface ReplicaSetInfo {
   desired: number;
   current: number;
   ready: number;
+  available?: number;
+  age: string;
+  ownerReferences?: string[];
+  labels?: Record<string, string>;
+  selector?: Record<string, string>;
+  containerDetails?: ReplicaSetContainer[];
+  conditions?: ReplicaSetCondition[];
+  runningContainers?: ReplicaSetRunningContainer[];
+}
+
+export interface ReplicaSetContainer {
+  name: string;
+  image: string;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface ReplicaSetCondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface ReplicaSetRunningContainer {
+  podName: string;
+  containerName: string;
+  ready: boolean;
+  state: string;
+  restarts: number;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface ReplicaSetEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
   age: string;
 }
 
@@ -348,10 +536,49 @@ export interface HPAInfo {
   name: string;
   namespace: string;
   reference: string;
+  referenceKind?: string;
+  referenceName?: string;
   targets: string;
   minPods: number;
   maxPods: number;
   replicas: number;
+  desiredReplicas?: number;
+  age: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  metrics?: HPAMetric[];
+  conditions?: HPACondition[];
+  lastScaleTime?: string;
+  scaleUpBehavior?: HPAScalingRules;
+  scaleDownBehavior?: HPAScalingRules;
+}
+
+export interface HPAMetric {
+  type: string;
+  name: string;
+  currentValue: string;
+  targetValue: string;
+  currentPercent?: number;
+  targetPercent?: number;
+}
+
+export interface HPACondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface HPAScalingRules {
+  stabilizationWindowSeconds?: number;
+  selectPolicy?: string;
+}
+
+export interface HPAEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
   age: string;
 }
 
@@ -498,6 +725,10 @@ export const api = {
   services: {
     list: (namespace?: string) =>
       request<ServiceInfo[]>(`/services${namespace ? `?namespace=${namespace}` : ''}`),
+    get: (namespace: string, name: string) =>
+      request<ServiceInfo>(`/services/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<ServiceEvent[]>(`/services/${namespace}/${name}/events`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/services/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -505,6 +736,10 @@ export const api = {
   configmaps: {
     list: (namespace?: string) =>
       request<ConfigMapInfo[]>(`/configmaps${namespace ? `?namespace=${namespace}` : ''}`),
+    get: (namespace: string, name: string) =>
+      request<ConfigMapInfo>(`/configmaps/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<ConfigMapEvent[]>(`/configmaps/${namespace}/${name}/events`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/configmaps/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -512,6 +747,10 @@ export const api = {
   secrets: {
     list: (namespace?: string) =>
       request<SecretInfo[]>(`/secrets${namespace ? `?namespace=${namespace}` : ''}`),
+    get: (namespace: string, name: string) =>
+      request<SecretInfo>(`/secrets/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<SecretEvent[]>(`/secrets/${namespace}/${name}/events`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/secrets/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -519,8 +758,18 @@ export const api = {
   jobs: {
     list: (namespace?: string) =>
       request<JobInfo[]>(`/jobs${namespace ? `?namespace=${namespace}` : ''}`),
+    get: (namespace: string, name: string) =>
+      request<JobInfo>(`/jobs/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<JobEvent[]>(`/jobs/${namespace}/${name}/events`),
     listCronJobs: (namespace?: string) =>
       request<CronJobInfo[]>(`/cronjobs${namespace ? `?namespace=${namespace}` : ''}`),
+    getCronJob: (namespace: string, name: string) =>
+      request<CronJobInfo>(`/cronjobs/${namespace}/${name}`),
+    cronJobEvents: (namespace: string, name: string) =>
+      request<CronJobEvent[]>(`/cronjobs/${namespace}/${name}/events`),
+    cronJobJobs: (namespace: string, name: string) =>
+      request<JobInfo[]>(`/cronjobs/${namespace}/${name}/jobs`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/jobs/${namespace}/${name}`, { method: 'DELETE' }),
     deleteCronJob: (namespace: string, name: string) =>
@@ -571,8 +820,16 @@ export const api = {
       request<DaemonSetEvent[]>(`/daemonsets/${namespace}/${name}/events`),
     listStatefulSets: (namespace?: string) =>
       request<StatefulSetInfo[]>(`/statefulsets${namespace ? `?namespace=${namespace}` : ''}`),
+    getStatefulSet: (namespace: string, name: string) =>
+      request<StatefulSetInfo>(`/statefulsets/${namespace}/${name}`),
+    statefulSetEvents: (namespace: string, name: string) =>
+      request<StatefulSetEvent[]>(`/statefulsets/${namespace}/${name}/events`),
     listReplicaSets: (namespace?: string) =>
       request<ReplicaSetInfo[]>(`/replicasets${namespace ? `?namespace=${namespace}` : ''}`),
+    getReplicaSet: (namespace: string, name: string) =>
+      request<ReplicaSetInfo>(`/replicasets/${namespace}/${name}`),
+    replicaSetEvents: (namespace: string, name: string) =>
+      request<ReplicaSetEvent[]>(`/replicasets/${namespace}/${name}/events`),
     deleteDaemonSet: (namespace: string, name: string) =>
       request<{ message: string }>(`/daemonsets/${namespace}/${name}`, { method: 'DELETE' }),
     deleteStatefulSet: (namespace: string, name: string) =>
@@ -597,6 +854,10 @@ export const api = {
   hpas: {
     list: (namespace?: string) =>
       request<HPAInfo[]>(`/hpas${namespace ? `?namespace=${namespace}` : ''}`),
+    get: (namespace: string, name: string) =>
+      request<HPAInfo>(`/hpas/${namespace}/${name}`),
+    events: (namespace: string, name: string) =>
+      request<HPAEvent[]>(`/hpas/${namespace}/${name}/events`),
   },
 
   events: {
