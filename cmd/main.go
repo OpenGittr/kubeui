@@ -169,6 +169,8 @@ func main() {
 
 	// Workload routes (DaemonSets, StatefulSets, ReplicaSets)
 	app.GET("/api/daemonsets", workloadHandler.ListDaemonSets)
+	app.GET("/api/daemonsets/{namespace}/{name}", workloadHandler.GetDaemonSet)
+	app.GET("/api/daemonsets/{namespace}/{name}/events", workloadHandler.DaemonSetEvents)
 	app.GET("/api/statefulsets", workloadHandler.ListStatefulSets)
 	app.GET("/api/replicasets", workloadHandler.ListReplicaSets)
 	app.DELETE("/api/daemonsets/{namespace}/{name}", workloadHandler.DeleteDaemonSet)

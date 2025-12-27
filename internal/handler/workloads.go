@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,15 +21,45 @@ func NewWorkloadHandler(k8s *service.K8sManager) *WorkloadHandler {
 
 // DaemonSet info
 type DaemonSetInfo struct {
-	Name            string `json:"name"`
-	Namespace       string `json:"namespace"`
-	Desired         int32  `json:"desired"`
-	Current         int32  `json:"current"`
-	Ready           int32  `json:"ready"`
-	UpToDate        int32  `json:"upToDate"`
-	Available       int32  `json:"available"`
-	NodeSelector    string `json:"nodeSelector"`
-	Age             string `json:"age"`
+	Name              string                   `json:"name"`
+	Namespace         string                   `json:"namespace"`
+	Desired           int32                    `json:"desired"`
+	Current           int32                    `json:"current"`
+	Ready             int32                    `json:"ready"`
+	UpToDate          int32                    `json:"upToDate"`
+	Available         int32                    `json:"available"`
+	NodeSelector      string                   `json:"nodeSelector"`
+	Age               string                   `json:"age"`
+	Labels            map[string]string        `json:"labels,omitempty"`
+	Selector          map[string]string        `json:"selector,omitempty"`
+	ContainerDetails  []DaemonSetContainer     `json:"containerDetails,omitempty"`
+	Conditions        []DaemonSetCondition     `json:"conditions,omitempty"`
+	RunningContainers []DaemonSetRunningContainer `json:"runningContainers,omitempty"`
+}
+
+type DaemonSetContainer struct {
+	Name   string        `json:"name"`
+	Image  string        `json:"image"`
+	CPU    ResourceUsage `json:"cpu"`
+	Memory ResourceUsage `json:"memory"`
+}
+
+type DaemonSetCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type DaemonSetRunningContainer struct {
+	PodName       string        `json:"podName"`
+	NodeName      string        `json:"nodeName"`
+	ContainerName string        `json:"containerName"`
+	Ready         bool          `json:"ready"`
+	State         string        `json:"state"`
+	Restarts      int32         `json:"restarts"`
+	CPU           ResourceUsage `json:"cpu"`
+	Memory        ResourceUsage `json:"memory"`
 }
 
 func (h *WorkloadHandler) ListDaemonSets(ctx *gofr.Context) (interface{}, error) {
@@ -67,6 +98,224 @@ func (h *WorkloadHandler) ListDaemonSets(ctx *gofr.Context) (interface{}, error)
 			Available:    ds.Status.NumberAvailable,
 			NodeSelector: nodeSelector,
 			Age:          formatAge(ds.CreationTimestamp.Time),
+		})
+	}
+
+	return result, nil
+}
+
+// GetDaemonSet returns details of a specific daemonset
+func (h *WorkloadHandler) GetDaemonSet(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	ds, err := client.AppsV1().DaemonSets(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	nodeSelector := ""
+	for k, v := range ds.Spec.Template.Spec.NodeSelector {
+		if nodeSelector != "" {
+			nodeSelector += ", "
+		}
+		nodeSelector += fmt.Sprintf("%s=%s", k, v)
+	}
+	if nodeSelector == "" {
+		nodeSelector = "<none>"
+	}
+
+	info := DaemonSetInfo{
+		Name:         ds.Name,
+		Namespace:    ds.Namespace,
+		Desired:      ds.Status.DesiredNumberScheduled,
+		Current:      ds.Status.CurrentNumberScheduled,
+		Ready:        ds.Status.NumberReady,
+		UpToDate:     ds.Status.UpdatedNumberScheduled,
+		Available:    ds.Status.NumberAvailable,
+		NodeSelector: nodeSelector,
+		Age:          formatAge(ds.CreationTimestamp.Time),
+		Labels:       ds.Labels,
+	}
+
+	if ds.Spec.Selector != nil {
+		info.Selector = ds.Spec.Selector.MatchLabels
+	}
+
+	// Container details from spec
+	for _, c := range ds.Spec.Template.Spec.Containers {
+		container := DaemonSetContainer{
+			Name:  c.Name,
+			Image: c.Image,
+		}
+		if c.Resources.Requests != nil {
+			container.CPU.Request = c.Resources.Requests.Cpu().MilliValue()
+			container.Memory.Request = c.Resources.Requests.Memory().Value()
+		}
+		if c.Resources.Limits != nil {
+			container.CPU.Limit = c.Resources.Limits.Cpu().MilliValue()
+			container.Memory.Limit = c.Resources.Limits.Memory().Value()
+		}
+		info.ContainerDetails = append(info.ContainerDetails, container)
+	}
+
+	// Conditions
+	for _, cond := range ds.Status.Conditions {
+		info.Conditions = append(info.Conditions, DaemonSetCondition{
+			Type:    string(cond.Type),
+			Status:  string(cond.Status),
+			Reason:  cond.Reason,
+			Message: cond.Message,
+		})
+	}
+
+	// Fetch running containers
+	if ds.Spec.Selector != nil {
+		info.RunningContainers = h.fetchDaemonSetRunningContainers(namespace, ds.Spec.Selector.MatchLabels)
+	}
+
+	return info, nil
+}
+
+// fetchDaemonSetRunningContainers gets all running container instances from pods matching the selector
+func (h *WorkloadHandler) fetchDaemonSetRunningContainers(namespace string, selector map[string]string) []DaemonSetRunningContainer {
+	var parts []string
+	for k, v := range selector {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+	}
+	labelSelector := strings.Join(parts, ",")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil
+	}
+
+	pods, err := client.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return nil
+	}
+
+	// Get metrics if available
+	metricsMap := make(map[string]map[string]ContainerResource)
+	mc, err := h.k8s.GetMetricsClient()
+	if err == nil {
+		podMetrics, err := mc.MetricsV1beta1().PodMetricses(namespace).List(context.Background(), metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err == nil {
+			for _, pm := range podMetrics.Items {
+				if metricsMap[pm.Name] == nil {
+					metricsMap[pm.Name] = make(map[string]ContainerResource)
+				}
+				for _, cm := range pm.Containers {
+					metricsMap[pm.Name][cm.Name] = ContainerResource{
+						CPU:    ResourceUsage{Usage: cm.Usage.Cpu().MilliValue()},
+						Memory: ResourceUsage{Usage: cm.Usage.Memory().Value()},
+					}
+				}
+			}
+		}
+	}
+
+	var result []DaemonSetRunningContainer
+	for _, pod := range pods.Items {
+		for _, cs := range pod.Status.ContainerStatuses {
+			state := "unknown"
+			if cs.State.Running != nil {
+				state = "running"
+			} else if cs.State.Waiting != nil {
+				state = cs.State.Waiting.Reason
+			} else if cs.State.Terminated != nil {
+				state = cs.State.Terminated.Reason
+			}
+
+			rc := DaemonSetRunningContainer{
+				PodName:       pod.Name,
+				NodeName:      pod.Spec.NodeName,
+				ContainerName: cs.Name,
+				Ready:         cs.Ready,
+				State:         state,
+				Restarts:      cs.RestartCount,
+			}
+
+			// Add metrics if available
+			if podMetrics, ok := metricsMap[pod.Name]; ok {
+				if cm, ok := podMetrics[cs.Name]; ok {
+					rc.CPU.Usage = cm.CPU.Usage
+					rc.Memory.Usage = cm.Memory.Usage
+				}
+			}
+
+			// Get request/limit from pod spec
+			for _, c := range pod.Spec.Containers {
+				if c.Name == cs.Name {
+					if c.Resources.Requests != nil {
+						rc.CPU.Request = c.Resources.Requests.Cpu().MilliValue()
+						rc.Memory.Request = c.Resources.Requests.Memory().Value()
+					}
+					if c.Resources.Limits != nil {
+						rc.CPU.Limit = c.Resources.Limits.Cpu().MilliValue()
+						rc.Memory.Limit = c.Resources.Limits.Memory().Value()
+					}
+					break
+				}
+			}
+
+			result = append(result, rc)
+		}
+	}
+
+	return result
+}
+
+// DaemonSetEvents returns events for a specific daemonset
+func (h *WorkloadHandler) DaemonSetEvents(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	fieldSelector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s,involvedObject.kind=DaemonSet", name, namespace)
+	events, err := client.CoreV1().Events(namespace).List(context.Background(), metav1.ListOptions{
+		FieldSelector: fieldSelector,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	type DaemonSetEvent struct {
+		Type    string `json:"type"`
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+		Count   int32  `json:"count"`
+		Age     string `json:"age"`
+	}
+
+	var result []DaemonSetEvent
+	for _, event := range events.Items {
+		age := ""
+		if !event.LastTimestamp.IsZero() {
+			age = formatAge(event.LastTimestamp.Time)
+		} else if !event.EventTime.IsZero() {
+			age = formatAge(event.EventTime.Time)
+		}
+
+		result = append(result, DaemonSetEvent{
+			Type:    event.Type,
+			Reason:  event.Reason,
+			Message: event.Message,
+			Count:   event.Count,
+			Age:     age,
 		})
 	}
 

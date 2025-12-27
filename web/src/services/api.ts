@@ -262,6 +262,44 @@ export interface DaemonSetInfo {
   available: number;
   nodeSelector: string;
   age: string;
+  labels?: Record<string, string>;
+  selector?: Record<string, string>;
+  containerDetails?: DaemonSetContainer[];
+  conditions?: DaemonSetCondition[];
+  runningContainers?: DaemonSetRunningContainer[];
+}
+
+export interface DaemonSetContainer {
+  name: string;
+  image: string;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface DaemonSetCondition {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+}
+
+export interface DaemonSetRunningContainer {
+  podName: string;
+  nodeName: string;
+  containerName: string;
+  ready: boolean;
+  state: string;
+  restarts: number;
+  cpu: { request: number; limit: number; usage: number };
+  memory: { request: number; limit: number; usage: number };
+}
+
+export interface DaemonSetEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  age: string;
 }
 
 export interface StatefulSetInfo {
@@ -527,6 +565,10 @@ export const api = {
   workloads: {
     listDaemonSets: (namespace?: string) =>
       request<DaemonSetInfo[]>(`/daemonsets${namespace ? `?namespace=${namespace}` : ''}`),
+    getDaemonSet: (namespace: string, name: string) =>
+      request<DaemonSetInfo>(`/daemonsets/${namespace}/${name}`),
+    daemonSetEvents: (namespace: string, name: string) =>
+      request<DaemonSetEvent[]>(`/daemonsets/${namespace}/${name}/events`),
     listStatefulSets: (namespace?: string) =>
       request<StatefulSetInfo[]>(`/statefulsets${namespace ? `?namespace=${namespace}` : ''}`),
     listReplicaSets: (namespace?: string) =>
