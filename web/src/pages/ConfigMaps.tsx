@@ -23,7 +23,7 @@ function ConfigMapDetailsPanel({
   onClose: () => void;
   onViewYaml: () => void;
 }) {
-  const { data: configmapDetails, isLoading: detailsLoading } = useQuery({
+  const { data: configmapDetails } = useQuery({
     queryKey: ['configmap-details', configmap.namespace, configmap.name],
     queryFn: () => api.configmaps.get(configmap.namespace, configmap.name),
   });

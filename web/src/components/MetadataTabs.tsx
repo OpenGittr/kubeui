@@ -280,9 +280,6 @@ function EnvTable({ containers }: { containers: ContainerEnv[] }) {
             <table className="w-full text-xs">
               <tbody>
                 {groups.map((group, groupIdx) => {
-                  const secretKey = `${container.name}-${group.source || group.type}`;
-                  const isUnlocked = unlockedSecrets.has(secretKey);
-
                   return (
                     <>
                       {/* Group Header Row */}
