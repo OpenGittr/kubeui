@@ -171,6 +171,14 @@ export interface ServicePort {
   protocol: string;
 }
 
+export interface ServicePortInput {
+  name?: string;
+  port: number;
+  targetPort?: string;
+  nodePort?: number;
+  protocol?: string;
+}
+
 export interface ServiceEndpoint {
   ip: string;
   nodeName?: string;
@@ -359,6 +367,7 @@ export interface NodeInfo {
   pods: NodeResource;
   labels: Record<string, string>;
   conditions: NodeCondition[];
+  unschedulable: boolean;
 }
 
 export interface NodeCondition {
@@ -367,6 +376,31 @@ export interface NodeCondition {
   reason: string;
   message: string;
   lastTransitionTime: string;
+}
+
+export interface BinPackingNode {
+  name: string;
+  allocatableCPU: number;     // millicores
+  allocatableMemory: number;  // bytes
+  allocatablePods: number;
+  usageCPU: number;
+  usageMemory: number;
+}
+
+export interface BinPackingPod {
+  namespace: string;
+  name: string;
+  status: string;
+  cpuRequest: number;
+  memoryRequest: number;
+  cpuUsage: number;
+  memoryUsage: number;
+}
+
+export interface BinPackingResponse {
+  node: BinPackingNode;
+  pods: BinPackingPod[];
+  metricsAvailable: boolean;
 }
 
 export interface DaemonSetInfo {
@@ -727,6 +761,12 @@ export const api = {
       request<{ message: string }>(`/deployments/${namespace}/${name}/restart`, {
         method: 'POST',
       }),
+    setImage: (namespace: string, name: string, container: string, image: string) =>
+      request<{ message: string }>(`/deployments/${namespace}/${name}/image`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ container, image }),
+      }),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/deployments/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -738,6 +778,12 @@ export const api = {
       request<ServiceInfo>(`/services/${namespace}/${name}`),
     events: (namespace: string, name: string) =>
       request<ServiceEvent[]>(`/services/${namespace}/${name}/events`),
+    setPorts: (namespace: string, name: string, ports: ServicePortInput[]) =>
+      request<{ message: string }>(`/services/${namespace}/${name}/ports`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ports }),
+      }),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/services/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -749,6 +795,16 @@ export const api = {
       request<ConfigMapInfo>(`/configmaps/${namespace}/${name}`),
     events: (namespace: string, name: string) =>
       request<ConfigMapEvent[]>(`/configmaps/${namespace}/${name}/events`),
+    upsertKey: (namespace: string, name: string, key: string, value: string) =>
+      request<{ message: string }>(`/configmaps/${namespace}/${name}/keys`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      }),
+    deleteKey: (namespace: string, name: string, key: string) =>
+      request<{ message: string }>(`/configmaps/${namespace}/${name}/keys/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      }),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/configmaps/${namespace}/${name}`, { method: 'DELETE' }),
   },
@@ -762,6 +818,16 @@ export const api = {
       request<SecretEvent[]>(`/secrets/${namespace}/${name}/events`),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/secrets/${namespace}/${name}`, { method: 'DELETE' }),
+    upsertKey: (namespace: string, name: string, key: string, value: string) =>
+      request<{ message: string }>(`/secrets/${namespace}/${name}/keys`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      }),
+    deleteKey: (namespace: string, name: string, key: string) =>
+      request<{ message: string }>(`/secrets/${namespace}/${name}/keys/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      }),
   },
 
   jobs: {
@@ -783,6 +849,12 @@ export const api = {
       request<{ message: string }>(`/jobs/${namespace}/${name}`, { method: 'DELETE' }),
     deleteCronJob: (namespace: string, name: string) =>
       request<{ message: string }>(`/cronjobs/${namespace}/${name}`, { method: 'DELETE' }),
+    updateCronJob: (namespace: string, name: string, patch: { suspend?: boolean; schedule?: string }) =>
+      request<{ message: string }>(`/cronjobs/${namespace}/${name}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }),
   },
 
   storage: {
@@ -818,6 +890,14 @@ export const api = {
 
   nodes: {
     list: () => request<NodeInfo[]>('/nodes'),
+    setCordon: (name: string, unschedulable: boolean) =>
+      request<{ message: string }>(`/nodes/${encodeURIComponent(name)}/cordon`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unschedulable }),
+      }),
+    binpacking: (name: string) =>
+      request<BinPackingResponse>(`/nodes/${encodeURIComponent(name)}/binpacking`),
   },
 
   workloads: {
@@ -845,6 +925,18 @@ export const api = {
       request<{ message: string }>(`/statefulsets/${namespace}/${name}`, { method: 'DELETE' }),
     deleteReplicaSet: (namespace: string, name: string) =>
       request<{ message: string }>(`/replicasets/${namespace}/${name}`, { method: 'DELETE' }),
+    setDaemonSetImage: (namespace: string, name: string, container: string, image: string) =>
+      request<{ message: string }>(`/daemonsets/${namespace}/${name}/image`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ container, image }),
+      }),
+    setStatefulSetImage: (namespace: string, name: string, container: string, image: string) =>
+      request<{ message: string }>(`/statefulsets/${namespace}/${name}/image`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ container, image }),
+      }),
   },
 
   network: {
@@ -867,6 +959,12 @@ export const api = {
       request<HPAInfo>(`/hpas/${namespace}/${name}`),
     events: (namespace: string, name: string) =>
       request<HPAEvent[]>(`/hpas/${namespace}/${name}/events`),
+    update: (namespace: string, name: string, patch: { minReplicas?: number; maxReplicas?: number }) =>
+      request<{ message: string }>(`/hpas/${namespace}/${name}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }),
   },
 
   events: {
@@ -900,6 +998,17 @@ export const api = {
     },
   },
 
+  permissions: {
+    get: (namespace: string) =>
+      request<PermissionsResponse>(`/permissions?namespace=${encodeURIComponent(namespace)}`),
+    check: (checks: PermCheck[]) =>
+      request<{ results: PermCheckResult[] }>(`/permissions/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checks }),
+      }),
+  },
+
   version: {
     check: () => request<VersionInfo>('/version'),
   },
@@ -920,6 +1029,31 @@ export interface SearchResult {
   namespace?: string;
   status?: string;
   age: string;
+}
+
+export interface ResourceRule {
+  verbs: string[];
+  apiGroups: string[];
+  resources: string[];
+  resourceNames?: string[];
+}
+
+export interface PermissionsResponse {
+  namespace: string;
+  resourceRules: ResourceRule[];
+  incomplete: boolean;
+}
+
+export interface PermCheck {
+  verb: string;
+  group: string;
+  resource: string;
+  namespace?: string;
+}
+
+export interface PermCheckResult extends PermCheck {
+  allowed: boolean;
+  reason?: string;
 }
 
 export interface VersionInfo {

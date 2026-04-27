@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Tailwind v4: enable class-based dark variant keyed off <html class="dark">. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
   margin: 0;
@@ -24,3 +27,157 @@ body {
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
+
+/* =========================================================================
+ * Dark mode
+ *
+ * Rather than adding `dark:` variants across hundreds of components we
+ * override the ~dozen color utilities that carry visual weight: neutral
+ * surfaces, colored pills (bg-*-50/100/200 + text-*-700/800), borders,
+ * text steps, and form fields.
+ *
+ * Contrast targets: body text 4.5:1 (WCAG AA), colored-pill text against
+ * tinted backgrounds at ~5:1. Tailwind shade pairs that normally use
+ * bg-<hue>-100 + text-<hue>-800 are remapped to a low-opacity tint of the
+ * same hue + the -300 shade, which reads cleanly on a gray-800 surface.
+ * ========================================================================= */
+
+html.dark body {
+  background-color: rgb(17 24 39); /* gray-900 */
+  color: rgb(229 231 235);         /* gray-200 */
+}
+
+/* ----- Neutral surfaces ------------------------------------------------- */
+/* Three-step ladder so alternating-row tables (bg-white + bg-gray-50) stay
+   visually distinct from the body (gray-900). Body sits at the floor;
+   bg-gray-50 is one step up; bg-white (cards / lifted rows) is two steps. */
+html.dark .bg-white            { background-color: rgb(31 41 55);  }  /* gray-800 */
+html.dark .bg-gray-50          { background-color: rgb(24 32 46);  }  /* between gray-900 and gray-800 */
+html.dark .bg-gray-50\/50      { background-color: rgb(24 32 46 / 0.55); } /* env-var alt rows */
+html.dark .bg-gray-100         { background-color: rgb(55 65 81);  }  /* gray-700 */
+html.dark .bg-gray-200         { background-color: rgb(75 85 99);  }  /* gray-600 */
+
+html.dark .hover\:bg-gray-50:hover  { background-color: rgb(55 65 81);  }
+html.dark .hover\:bg-gray-100:hover { background-color: rgb(55 65 81);  }
+html.dark .hover\:bg-gray-200:hover { background-color: rgb(75 85 99);  }
+
+/* Neutral borders */
+html.dark .border-gray-100     { border-color: rgb(55 65 81);  }
+html.dark .border-gray-200     { border-color: rgb(55 65 81);  }
+html.dark .border-gray-300     { border-color: rgb(75 85 99);  }
+html.dark .divide-gray-100 > :not(:last-child) { border-color: rgb(55 65 81); }
+html.dark .divide-gray-200 > :not(:last-child) { border-color: rgb(55 65 81); }
+
+/* Neutral text steps (shift one tone lighter for dark bg contrast) */
+html.dark .text-gray-900       { color: rgb(243 244 246); }  /* gray-100 */
+html.dark .text-gray-800       { color: rgb(229 231 235); }  /* gray-200 */
+html.dark .text-gray-700       { color: rgb(209 213 219); }  /* gray-300 */
+html.dark .text-gray-600       { color: rgb(156 163 175); }  /* gray-400 */
+html.dark .text-gray-500       { color: rgb(156 163 175); }
+html.dark .text-gray-400       { color: rgb(107 114 128); }  /* gray-500 */
+html.dark .text-gray-300       { color: rgb(75 85 99);   }
+
+/* ----- Colored pills: subtle tinted bg + lighter text ------------------ */
+/* Blue */
+html.dark .bg-blue-50          { background-color: rgb(59 130 246 / 0.12); }
+html.dark .bg-blue-100         { background-color: rgb(59 130 246 / 0.18); }
+html.dark .bg-blue-200         { background-color: rgb(59 130 246 / 0.28); }
+html.dark .hover\:bg-blue-50:hover  { background-color: rgb(59 130 246 / 0.18); }
+html.dark .hover\:bg-blue-100:hover { background-color: rgb(59 130 246 / 0.25); }
+html.dark .text-blue-900       { color: rgb(191 219 254); } /* blue-200 */
+html.dark .text-blue-800       { color: rgb(147 197 253); } /* blue-300 */
+html.dark .text-blue-700       { color: rgb(147 197 253); }
+html.dark .text-blue-600       { color: rgb(96 165 250);  } /* blue-400 - used as link */
+html.dark .border-blue-100     { border-color: rgb(59 130 246 / 0.3); }
+html.dark .border-blue-200     { border-color: rgb(59 130 246 / 0.4); }
+
+/* Green / Emerald */
+html.dark .bg-green-50         { background-color: rgb(34 197 94 / 0.12); }
+html.dark .bg-green-100        { background-color: rgb(34 197 94 / 0.18); }
+html.dark .bg-green-200        { background-color: rgb(34 197 94 / 0.28); }
+html.dark .bg-emerald-50       { background-color: rgb(16 185 129 / 0.12); }
+html.dark .bg-emerald-100      { background-color: rgb(16 185 129 / 0.18); }
+html.dark .text-green-900      { color: rgb(187 247 208); } /* green-200 */
+html.dark .text-green-800      { color: rgb(134 239 172); } /* green-300 */
+html.dark .text-green-700      { color: rgb(134 239 172); }
+html.dark .text-green-600      { color: rgb(74 222 128);  } /* green-400 */
+html.dark .text-emerald-700    { color: rgb(110 231 183); }
+html.dark .border-green-400    { border-color: rgb(74 222 128 / 0.55); }
+
+/* Yellow / Amber */
+html.dark .bg-yellow-50        { background-color: rgb(234 179 8 / 0.12); }
+html.dark .bg-yellow-100       { background-color: rgb(234 179 8 / 0.18); }
+html.dark .bg-yellow-200       { background-color: rgb(234 179 8 / 0.28); }
+html.dark .text-yellow-900     { color: rgb(254 240 138); } /* yellow-200 */
+html.dark .text-yellow-800     { color: rgb(253 224 71);  } /* yellow-300 */
+html.dark .text-yellow-700     { color: rgb(253 224 71);  }
+html.dark .text-yellow-600     { color: rgb(250 204 21);  } /* yellow-400 */
+html.dark .text-amber-700      { color: rgb(252 211 77);  }
+html.dark .border-yellow-400   { border-color: rgb(250 204 21 / 0.55); }
+
+/* Red */
+html.dark .bg-red-50           { background-color: rgb(239 68 68 / 0.12); }
+html.dark .bg-red-100          { background-color: rgb(239 68 68 / 0.18); }
+html.dark .bg-red-200          { background-color: rgb(239 68 68 / 0.28); }
+html.dark .hover\:bg-red-50:hover   { background-color: rgb(239 68 68 / 0.18); }
+html.dark .hover\:bg-red-100:hover  { background-color: rgb(239 68 68 / 0.25); }
+html.dark .text-red-900        { color: rgb(254 202 202); } /* red-200 */
+html.dark .text-red-800        { color: rgb(252 165 165); } /* red-300 */
+html.dark .text-red-700        { color: rgb(252 165 165); }
+html.dark .text-red-600        { color: rgb(248 113 113); } /* red-400 */
+html.dark .border-red-200      { border-color: rgb(239 68 68 / 0.3); }
+
+/* Purple */
+html.dark .bg-purple-50        { background-color: rgb(168 85 247 / 0.12); }
+html.dark .bg-purple-100       { background-color: rgb(168 85 247 / 0.18); }
+html.dark .bg-purple-200       { background-color: rgb(168 85 247 / 0.28); }
+html.dark .text-purple-900     { color: rgb(233 213 255); }
+html.dark .text-purple-800     { color: rgb(216 180 254); }
+html.dark .text-purple-700     { color: rgb(216 180 254); }
+html.dark .text-purple-600     { color: rgb(192 132 252); }
+
+/* Orange */
+html.dark .bg-orange-50        { background-color: rgb(249 115 22 / 0.12); }
+html.dark .bg-orange-100       { background-color: rgb(249 115 22 / 0.18); }
+html.dark .text-orange-800     { color: rgb(253 186 116); }
+html.dark .text-orange-700     { color: rgb(253 186 116); }
+
+/* Teal */
+html.dark .text-teal-600       { color: rgb(45 212 191); } /* teal-400 */
+
+/* ----- Form inputs ------------------------------------------------------ */
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background-color: rgb(31 41 55);
+  color: rgb(229 231 235);
+  border-color: rgb(75 85 99);
+}
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: rgb(107 114 128);
+}
+
+/* kbd chips */
+html.dark kbd.bg-gray-200      { background-color: rgb(75 85 99); color: rgb(229 231 235); }
+
+/* ----- Primary buttons (bg-blue-600 etc) intentionally NOT overridden --- */
+/* Solid colored action buttons should remain punchy in both modes. */
+
+/* ----- Status background tints on resource usage bars ------------------- */
+/* These are usually direct bg-red-500/bg-yellow-500/bg-green-500 fills; leave
+   solid colors untouched — they render identically on either theme. */
+
+/* =========================================================================
+ * Light-mode contrast nudges
+ *
+ * `text-gray-400` on white is 3.07:1 — below WCAG AA (4.5:1) for normal
+ * text. We keep it for purely decorative uses (chevron icons, separators)
+ * but most callers use it for actual content. Pushing to gray-500 (4.74:1)
+ * fixes AA everywhere at a small visual cost — still subtly muted.
+ *
+ * Decorative uses in our codebase are icons inside <svg>, which get their
+ * color via stroke/fill that we don't override here, so this only affects
+ * text nodes.
+ * ========================================================================= */
+html:not(.dark) .text-gray-400 { color: rgb(107 114 128); } /* gray-500 */

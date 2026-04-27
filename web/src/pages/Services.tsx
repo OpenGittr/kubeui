@@ -1,13 +1,190 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
-import type { ServiceInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
+import type { ServiceInfo, ServicePortInput, ServicePort } from '../services/api';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Cable, Save, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const SVC_SORTERS = {
+  name: (s: ServiceInfo) => s.name,
+  namespace: (s: ServiceInfo) => s.namespace,
+  type: (s: ServiceInfo) => s.type,
+  clusterIP: (s: ServiceInfo) => s.clusterIP,
+  externalIP: (s: ServiceInfo) => s.externalIP ?? '',
+  age: (s: ServiceInfo) => -ageSeconds(s.age),
+};
+
+const SVC_CHECKS = [
+  { verb: 'patch', group: '', resource: 'services' },
+  { verb: 'delete', group: '', resource: 'services' },
+];
+
+function EditPortsModal({ service, onClose }: { service: ServiceInfo; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { addToast } = useToast();
+  const { data: details } = useQuery({
+    queryKey: ['service-details', service.namespace, service.name],
+    queryFn: () => api.services.get(service.namespace, service.name),
+  });
+
+  const toInput = (p: ServicePort): ServicePortInput => ({
+    name: p.name || undefined,
+    port: p.port,
+    targetPort: p.targetPort,
+    nodePort: p.nodePort,
+    protocol: p.protocol || 'TCP',
+  });
+
+  const [ports, setPorts] = useState<ServicePortInput[] | null>(null);
+
+  // Initialise from details once loaded.
+  if (ports === null && details?.portDetails) {
+    setPorts(details.portDetails.map(toInput));
+  }
+
+  const mutation = useMutation({
+    mutationFn: () => api.services.setPorts(service.namespace, service.name, ports || []),
+    onSuccess: () => {
+      addToast(`Ports updated on ${service.name}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['services'] });
+      queryClient.invalidateQueries({ queryKey: ['service-details', service.namespace, service.name] });
+      onClose();
+    },
+    onError: (err: Error) => addToast(`Update failed: ${err.message}`, 'error'),
+  });
+
+  const update = (idx: number, patch: Partial<ServicePortInput>) => {
+    setPorts(prev => (prev || []).map((p, i) => i === idx ? { ...p, ...patch } : p));
+  };
+  const removeAt = (idx: number) => setPorts(prev => (prev || []).filter((_, i) => i !== idx));
+  const add = () => setPorts(prev => ([...(prev || []), { port: 80, targetPort: '80', protocol: 'TCP' }]));
+
+  const invalid = !ports || ports.length === 0 || ports.some(p => !p.port || p.port < 1);
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center p-4 border-b">
+          <h2 className="text-lg font-semibold">Edit ports — {service.name}</h2>
+          <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4">
+          {ports === null ? (
+            <p className="text-sm text-gray-500">Loading...</p>
+          ) : (
+            <>
+              <table className="w-full text-xs border border-gray-200 rounded">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Name</th>
+                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Port</th>
+                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Target</th>
+                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">NodePort</th>
+                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Protocol</th>
+                    <th className="w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ports.map((p, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-2 py-1.5">
+                        <input
+                          value={p.name || ''}
+                          onChange={e => update(i, { name: e.target.value || undefined })}
+                          className="w-full px-1.5 py-0.5 border border-gray-300 rounded font-mono"
+                          placeholder="(optional)"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min={1}
+                          value={p.port}
+                          onChange={e => update(i, { port: Number(e.target.value) })}
+                          className="w-20 px-1.5 py-0.5 border border-gray-300 rounded font-mono"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          value={p.targetPort ?? ''}
+                          onChange={e => update(i, { targetPort: e.target.value })}
+                          placeholder={String(p.port)}
+                          className="w-24 px-1.5 py-0.5 border border-gray-300 rounded font-mono"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          value={p.nodePort ?? ''}
+                          onChange={e => update(i, { nodePort: e.target.value ? Number(e.target.value) : undefined })}
+                          className="w-20 px-1.5 py-0.5 border border-gray-300 rounded font-mono"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <select
+                          value={p.protocol || 'TCP'}
+                          onChange={e => update(i, { protocol: e.target.value })}
+                          className="px-1.5 py-0.5 border border-gray-300 rounded"
+                        >
+                          <option>TCP</option>
+                          <option>UDP</option>
+                          <option>SCTP</option>
+                        </select>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <button
+                          onClick={() => removeAt(i)}
+                          className="p-0.5 hover:bg-red-100 rounded"
+                          title="Remove port"
+                        >
+                          <Trash2 className="w-3 h-3 text-red-600" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                onClick={add}
+                className="mt-2 flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded"
+              >
+                <Plus className="w-3 h-3" />
+                Add port
+              </button>
+              {service.type === 'LoadBalancer' && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Tip: LoadBalancer services often auto-assign NodePorts. Clear NodePort to let Kubernetes pick one.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 rounded-b-lg">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm bg-white border border-gray-300 hover:bg-gray-100 rounded">Cancel</button>
+          <button
+            disabled={invalid || mutation.isPending}
+            onClick={() => mutation.mutate()}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded flex items-center gap-1 disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            {mutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface ServicesProps {
   namespace?: string;
@@ -199,6 +376,12 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
   const [yamlService, setYamlService] = useState<ServiceInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ServiceInfo | null>(null);
   const [selectedService, setSelectedService] = useState<ServiceInfo | null>(null);
+  const [editPortsTarget, setEditPortsTarget] = useState<ServiceInfo | null>(null);
+  const { can } = usePermissions(namespace, SVC_CHECKS);
+  const canPatch = can('patch', '', 'services');
+  const canDelete = can('delete', '', 'services');
+  const patchTitle = canPatch ? undefined : 'Requires patch on services';
+  const deleteTitle = canDelete ? undefined : 'Requires delete on services';
 
   const { data: services, isLoading, error } = useQuery({
     queryKey: ['services', namespace],
@@ -206,6 +389,8 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(services, selectedService, setSelectedService);
+  const sort = useTableSort(services, SVC_SORTERS);
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.services.delete(ns, name),
@@ -247,18 +432,18 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Type</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Cluster IP</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">External IP</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="type" label="Type" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="clusterIP" label="Cluster IP" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="externalIP" label="External IP" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ports</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {services?.map((svc) => (
+            {sort.sorted.map((svc) => (
               <tr
                 key={`${svc.namespace}/${svc.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedService?.name === svc.name && selectedService?.namespace === svc.namespace ? 'bg-blue-50' : ''}`}
@@ -274,7 +459,7 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
                 <td className="px-4 py-3 text-sm"><ServiceTypeBadge type={svc.type} /></td>
                 <td className="px-4 py-3 text-sm font-mono">{svc.clusterIP}</td>
                 <td className="px-4 py-3 text-sm font-mono">{svc.externalIP || '-'}</td>
-                <td className="px-4 py-3 text-sm">{svc.ports.join(', ') || '-'}</td>
+                <td className="px-4 py-3 text-sm">{svc.ports?.join(', ') || '-'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{svc.age}</td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <ActionMenu
@@ -285,6 +470,13 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
                         onClick: () => setSelectedService(svc),
                       },
                       {
+                        label: 'Edit ports',
+                        icon: <Cable className="w-4 h-4" />,
+                        disabled: !canPatch,
+                        title: patchTitle,
+                        onClick: () => setEditPortsTarget(svc),
+                      },
+                      {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlService(svc),
@@ -293,6 +485,8 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(svc),
                       },
                     ]}
@@ -315,6 +509,10 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
           name={yamlService.name}
           onClose={() => setYamlService(null)}
         />
+      )}
+
+      {editPortsTarget && (
+        <EditPortsModal service={editPortsTarget} onClose={() => setEditPortsTarget(null)} />
       )}
 
       <ConfirmDialog

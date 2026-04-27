@@ -30,7 +30,10 @@ import {
   Github,
   Bug,
   Star,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import { useTheme } from './ThemeProvider';
 
 interface NavItem {
   path: string;
@@ -166,6 +169,7 @@ export function Layout({
 }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -357,6 +361,13 @@ export function Layout({
 
           {/* Search button */}
           <div className="flex-1" />
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-200"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
           <button
             onClick={() => setSearchOpen(true)}
             className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200"

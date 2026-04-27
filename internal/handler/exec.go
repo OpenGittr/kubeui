@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/opengittr/kubeui/internal/service"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -37,11 +39,15 @@ func NewExecHandler(k8sManager *service.K8sManager) *ExecHandler {
 
 // TerminalMessage represents a message between frontend and backend
 type TerminalMessage struct {
-	Type string `json:"type"` // "input", "output", "resize", "error"
-	Data string `json:"data,omitempty"`
-	Rows uint16 `json:"rows,omitempty"`
-	Cols uint16 `json:"cols,omitempty"`
+	Type  string `json:"type"` // "input", "output", "resize", "error", "shell"
+	Data  string `json:"data,omitempty"`
+	Rows  uint16 `json:"rows,omitempty"`
+	Cols  uint16 `json:"cols,omitempty"`
+	Shell string `json:"shell,omitempty"` // Indicates which shell is being used
 }
+
+// shellsToTry is the ordered list of shells to attempt
+var shellsToTry = []string{"/bin/bash", "/bin/sh"}
 
 // wsWriter implements io.Writer for WebSocket
 type wsWriter struct {
@@ -88,10 +94,6 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 	container := r.URL.Query().Get("container")
 	shell := r.URL.Query().Get("shell")
 
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
 	// Upgrade to WebSocket
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -125,6 +127,13 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Determine which shell to use
+	selectedShell := shell
+	if selectedShell == "" {
+		// Auto-detect available shell
+		selectedShell = h.detectShell(client, namespace, name, container)
+	}
+
 	// Create exec request
 	req := client.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -133,7 +142,7 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: container,
-			Command:   []string{shell},
+			Command:   []string{selectedShell},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -146,6 +155,9 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 		h.sendError(conn, fmt.Sprintf("Failed to create executor: %v", err))
 		return
 	}
+
+	// Notify client which shell we're using
+	h.sendShellInfo(conn, selectedShell)
 
 	// Create writer for output
 	writer := &wsWriter{conn: conn}
@@ -162,10 +174,20 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Channel to signal goroutine completion
+	done := make(chan struct{})
+
 	// Start goroutine to read from WebSocket and write to stdin
 	go func() {
+		defer close(done)
 		defer stdinWriter.Close()
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			_, message, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
@@ -179,7 +201,9 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 
 			switch msg.Type {
 			case "input":
-				stdinWriter.Write([]byte(msg.Data))
+				if _, err := stdinWriter.Write([]byte(msg.Data)); err != nil {
+					return
+				}
 			case "resize":
 				select {
 				case termSize.sizeChan <- remotecommand.TerminalSize{
@@ -201,9 +225,68 @@ func (h *ExecHandler) HandleExec(w http.ResponseWriter, r *http.Request) {
 		TerminalSizeQueue: termSize,
 	})
 
+	// Cancel context to stop the goroutine
+	cancel()
+
+	// Wait for goroutine to finish
+	<-done
+
 	if err != nil {
 		h.sendError(conn, fmt.Sprintf("Exec error: %v", err))
 	}
+}
+
+// detectShell tries to find an available shell in the container
+func (h *ExecHandler) detectShell(client kubernetes.Interface, namespace, podName, container string) string {
+	config, err := h.k8sManager.GetConfig()
+	if err != nil {
+		return "/bin/sh" // Default fallback
+	}
+
+	for _, shell := range shellsToTry {
+		// Create a quick exec to test if shell exists
+		req := client.CoreV1().RESTClient().Post().
+			Resource("pods").
+			Name(podName).
+			Namespace(namespace).
+			SubResource("exec").
+			VersionedParams(&corev1.PodExecOptions{
+				Container: container,
+				Command:   []string{shell, "-c", "exit 0"},
+				Stdin:     false,
+				Stdout:    true,
+				Stderr:    true,
+				TTY:       false,
+			}, scheme.ParameterCodec)
+
+		exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
+		if err != nil {
+			continue
+		}
+
+		// Try to execute - if it works, this shell exists
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		})
+		cancel()
+
+		if err == nil {
+			return shell
+		}
+	}
+
+	return "/bin/sh" // Default fallback
+}
+
+func (h *ExecHandler) sendShellInfo(conn *websocket.Conn, shell string) {
+	msg := TerminalMessage{
+		Type:  "shell",
+		Shell: shell,
+	}
+	data, _ := json.Marshal(msg)
+	conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func (h *ExecHandler) sendError(conn *websocket.Conn, message string) {

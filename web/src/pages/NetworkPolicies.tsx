@@ -3,6 +3,11 @@ import { api } from '../services/api';
 import type { NetworkPolicyInfo } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
 import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+
+const NP_CHECKS = [
+  { verb: 'delete', group: 'networking.k8s.io', resource: 'networkpolicies' },
+];
 
 interface NetworkPoliciesProps {
   namespace?: string;
@@ -20,6 +25,9 @@ export function NetworkPolicies({ namespace, isConnected = true }: NetworkPolici
   });
 
   const { addToast } = useToast();
+  const { can } = usePermissions(namespace, NP_CHECKS);
+  const canDelete = can('delete', 'networking.k8s.io', 'networkpolicies');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on networkpolicies';
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.network.deleteNetworkPolicy(ns, name),
@@ -47,6 +55,8 @@ export function NetworkPolicies({ namespace, isConnected = true }: NetworkPolici
       resourceType="networkpolicies"
       getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
       onDelete={(item: NetworkPolicyInfo) => deleteMutation.mutate({ ns: item.namespace, name: item.name })}
+      canDelete={canDelete}
+      deleteTitle={deleteTitle}
       columns={[
         { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
         { key: 'namespace', header: 'Namespace', className: 'text-gray-600' },

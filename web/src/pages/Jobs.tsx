@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { JobInfo, CronJobInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Pause, Play, Clock, Save } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
@@ -9,6 +9,90 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const JOB_SORTERS = {
+  name: (j: JobInfo) => j.name,
+  namespace: (j: JobInfo) => j.namespace,
+  status: (j: JobInfo) => j.status,
+  completions: (j: JobInfo) => j.completions,
+  duration: (j: JobInfo) => j.duration ?? '',
+  age: (j: JobInfo) => -ageSeconds(j.age),
+};
+
+const CRONJOB_SORTERS = {
+  name: (c: CronJobInfo) => c.name,
+  namespace: (c: CronJobInfo) => c.namespace,
+  schedule: (c: CronJobInfo) => c.schedule,
+  suspend: (c: CronJobInfo) => c.suspend ? 1 : 0,
+  active: (c: CronJobInfo) => c.active,
+  lastSchedule: (c: CronJobInfo) => c.lastSchedule ?? '',
+  age: (c: CronJobInfo) => -ageSeconds(c.age),
+};
+
+const JOB_CHECKS = [
+  { verb: 'patch', group: 'batch', resource: 'cronjobs' },
+  { verb: 'delete', group: 'batch', resource: 'cronjobs' },
+  { verb: 'delete', group: 'batch', resource: 'jobs' },
+];
+
+function EditCronJobScheduleModal({ cronjob, onClose }: { cronjob: CronJobInfo; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { addToast } = useToast();
+  const [schedule, setSchedule] = useState(cronjob.schedule || '');
+
+  const mutation = useMutation({
+    mutationFn: () => api.jobs.updateCronJob(cronjob.namespace, cronjob.name, { schedule }),
+    onSuccess: () => {
+      addToast(`Schedule updated for ${cronjob.name}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['cronjobs'] });
+      queryClient.invalidateQueries({ queryKey: ['cronjob-details', cronjob.namespace, cronjob.name] });
+      onClose();
+    },
+    onError: (err: Error) => addToast(`Update failed: ${err.message}`, 'error'),
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center p-4 border-b">
+          <h2 className="text-lg font-semibold">Edit schedule — {cronjob.name}</h2>
+          <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Cron expression</label>
+            <input
+              value={schedule}
+              onChange={e => setSchedule(e.target.value)}
+              placeholder="*/5 * * * *"
+              className="w-full px-2 py-1.5 text-sm font-mono border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              Format: minute hour day-of-month month day-of-week
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 rounded-b-lg">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm bg-white border border-gray-300 hover:bg-gray-100 rounded">Cancel</button>
+          <button
+            disabled={!schedule || schedule === cronjob.schedule || mutation.isPending}
+            onClick={() => mutation.mutate()}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded flex items-center gap-1 disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            {mutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface JobsProps {
   namespace?: string;
@@ -133,6 +217,7 @@ function JobDetailsPanel({
                   state={container.state}
                   restarts={container.restarts}
                   podName={container.podName}
+                  podNamespace={job.namespace}
                   resources={{
                     cpu: container.cpu,
                     memory: container.memory,
@@ -420,6 +505,14 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
   const [view, setView] = useState<'jobs' | 'cronjobs'>('jobs');
   const [yamlJob, setYamlJob] = useState<JobInfo | null>(null);
   const [yamlCronJob, setYamlCronJob] = useState<CronJobInfo | null>(null);
+  const [editSchedule, setEditSchedule] = useState<CronJobInfo | null>(null);
+  const { can } = usePermissions(namespace, JOB_CHECKS);
+  const canPatchCJ = can('patch', 'batch', 'cronjobs');
+  const canDeleteCJ = can('delete', 'batch', 'cronjobs');
+  const canDeleteJob = can('delete', 'batch', 'jobs');
+  const patchCJTitle = canPatchCJ ? undefined : 'Requires patch on cronjobs';
+  const deleteCJTitle = canDeleteCJ ? undefined : 'Requires delete on cronjobs';
+  const deleteJobTitle = canDeleteJob ? undefined : 'Requires delete on jobs';
   const [deleteJobTarget, setDeleteJobTarget] = useState<JobInfo | null>(null);
   const [deleteCronJobTarget, setDeleteCronJobTarget] = useState<CronJobInfo | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
@@ -438,6 +531,10 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected && view === 'cronjobs',
   });
+  useSelectedResource(view === 'jobs' ? jobs : undefined, selectedJob, setSelectedJob);
+  useSelectedResource(view === 'cronjobs' ? cronJobs : undefined, selectedCronJob, setSelectedCronJob);
+  const jobSort = useTableSort(jobs, JOB_SORTERS);
+  const cjSort = useTableSort(cronJobs, CRONJOB_SORTERS);
 
   const { addToast } = useToast();
 
@@ -449,6 +546,19 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
     },
     onError: (error: Error) => {
       addToast(`Failed to delete: ${error.message}`, 'error');
+    },
+  });
+
+  const suspendCronJobMutation = useMutation({
+    mutationFn: ({ cj, suspend }: { cj: CronJobInfo; suspend: boolean }) =>
+      api.jobs.updateCronJob(cj.namespace, cj.name, { suspend }),
+    onSuccess: (_, { cj, suspend }) => {
+      addToast(`${cj.name} ${suspend ? 'suspended' : 'resumed'}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['cronjobs'] });
+      queryClient.invalidateQueries({ queryKey: ['cronjob-details', cj.namespace, cj.name] });
+    },
+    onError: (error: Error) => {
+      addToast(`Failed: ${error.message}`, 'error');
     },
   });
 
@@ -504,17 +614,17 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Status</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Completions</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Duration</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+                    <SortableTh sortKey="name" label="Name" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
+                    <SortableTh sortKey="namespace" label="Namespace" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
+                    <SortableTh sortKey="status" label="Status" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
+                    <SortableTh sortKey="completions" label="Completions" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
+                    <SortableTh sortKey="duration" label="Duration" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
+                    <SortableTh sortKey="age" label="Age" active={jobSort.sortKey} direction={jobSort.direction} onToggle={jobSort.toggle} />
                     <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {jobs?.map((job) => (
+                  {jobSort.sorted.map((job) => (
                     <tr
                       key={`${job.namespace}/${job.name}`}
                       className={`hover:bg-gray-50 cursor-pointer ${selectedJob?.name === job.name && selectedJob?.namespace === job.namespace ? 'bg-blue-50' : ''}`}
@@ -548,6 +658,8 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
                               label: 'Delete',
                               icon: <Trash2 className="w-4 h-4" />,
                               variant: 'danger',
+                              disabled: !canDeleteJob,
+                              title: deleteJobTitle,
                               onClick: () => setDeleteJobTarget(job),
                             },
                           ]}
@@ -574,18 +686,18 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Schedule</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Suspended</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Active</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Last Schedule</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+                    <SortableTh sortKey="name" label="Name" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="namespace" label="Namespace" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="schedule" label="Schedule" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="suspend" label="Suspended" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="active" label="Active" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="lastSchedule" label="Last Schedule" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
+                    <SortableTh sortKey="age" label="Age" active={cjSort.sortKey} direction={cjSort.direction} onToggle={cjSort.toggle} />
                     <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {cronJobs?.map((cj) => (
+                  {cjSort.sorted.map((cj) => (
                     <tr
                       key={`${cj.namespace}/${cj.name}`}
                       className={`hover:bg-gray-50 cursor-pointer ${selectedCronJob?.name === cj.name && selectedCronJob?.namespace === cj.namespace ? 'bg-blue-50' : ''}`}
@@ -616,6 +728,20 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
                               onClick: () => setSelectedCronJob(cj),
                             },
                             {
+                              label: cj.suspend ? 'Resume' : 'Suspend',
+                              icon: cj.suspend ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />,
+                              disabled: !canPatchCJ,
+                              title: patchCJTitle,
+                              onClick: () => suspendCronJobMutation.mutate({ cj, suspend: !cj.suspend }),
+                            },
+                            {
+                              label: 'Edit schedule',
+                              icon: <Clock className="w-4 h-4" />,
+                              disabled: !canPatchCJ,
+                              title: patchCJTitle,
+                              onClick: () => setEditSchedule(cj),
+                            },
+                            {
                               label: 'View YAML',
                               icon: <FileCode className="w-4 h-4" />,
                               onClick: () => setYamlCronJob(cj),
@@ -624,6 +750,8 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
                               label: 'Delete',
                               icon: <Trash2 className="w-4 h-4" />,
                               variant: 'danger',
+                              disabled: !canDeleteCJ,
+                              title: deleteCJTitle,
                               onClick: () => setDeleteCronJobTarget(cj),
                             },
                           ]}
@@ -657,6 +785,10 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
           name={yamlCronJob.name}
           onClose={() => setYamlCronJob(null)}
         />
+      )}
+
+      {editSchedule && (
+        <EditCronJobScheduleModal cronjob={editSchedule} onClose={() => setEditSchedule(null)} />
       )}
 
       <ConfirmDialog

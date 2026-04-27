@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -927,6 +929,84 @@ func (h *WorkloadHandler) DeleteStatefulSet(ctx *gofr.Context) (interface{}, err
 	}
 
 	return map[string]string{"message": fmt.Sprintf("StatefulSet %s deleted", name)}, nil
+}
+
+type setImageRequest struct {
+	Container string `json:"container"`
+	Image     string `json:"image"`
+}
+
+// buildImagePatch returns a strategic-merge-patch body that replaces one
+// container's image. Strategic-merge uses name as the merge key for containers.
+func buildImagePatch(container, image string) ([]byte, error) {
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []map[string]string{
+						{"name": container, "image": image},
+					},
+				},
+			},
+		},
+	}
+	return json.Marshal(patch)
+}
+
+func (h *WorkloadHandler) SetDaemonSetImage(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req setImageRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.Container == "" || req.Image == "" {
+		return nil, fmt.Errorf("container and image are required")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildImagePatch(req.Container, req.Image)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.AppsV1().DaemonSets(namespace).Patch(
+		context.Background(), name, types.StrategicMergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("DaemonSet %s: container %s image set to %s", name, req.Container, req.Image)}, nil
+}
+
+func (h *WorkloadHandler) SetStatefulSetImage(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req setImageRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.Container == "" || req.Image == "" {
+		return nil, fmt.Errorf("container and image are required")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildImagePatch(req.Container, req.Image)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.AppsV1().StatefulSets(namespace).Patch(
+		context.Background(), name, types.StrategicMergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("StatefulSet %s: container %s image set to %s", name, req.Container, req.Image)}, nil
 }
 
 func (h *WorkloadHandler) DeleteReplicaSet(ctx *gofr.Context) (interface{}, error) {

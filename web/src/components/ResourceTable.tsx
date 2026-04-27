@@ -26,6 +26,7 @@ interface ResourceTableProps<T> {
   getResourceInfo?: (item: T) => { namespace?: string; name: string };
   onDelete?: (item: T) => void;
   canDelete?: boolean;
+  deleteTitle?: string;
   searchKeys?: string[];
 }
 
@@ -44,6 +45,7 @@ export function ResourceTable<T>({
   getResourceInfo,
   onDelete,
   canDelete = true,
+  deleteTitle,
   searchKeys = ['name', 'namespace'],
 }: ResourceTableProps<T>) {
   const [yamlResource, setYamlResource] = useState<{ namespace?: string; name: string } | null>(null);
@@ -223,6 +225,7 @@ export function ResourceTable<T>({
                             icon: <Trash2 className="w-4 h-4" />,
                             variant: 'danger' as const,
                             disabled: !canDelete,
+                            title: deleteTitle,
                             onClick: () => setDeleteTarget(item),
                           }] : []),
                         ]}

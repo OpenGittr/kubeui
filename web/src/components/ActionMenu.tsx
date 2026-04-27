@@ -8,6 +8,7 @@ interface ActionMenuItem {
   onClick: () => void;
   variant?: 'default' | 'danger';
   disabled?: boolean;
+  title?: string;
 }
 
 interface ActionMenuProps {
@@ -65,6 +66,7 @@ export function ActionMenu({ items }: ActionMenuProps) {
             <button
               key={idx}
               disabled={item.disabled}
+              title={item.title}
               onClick={(e) => {
                 e.stopPropagation();
                 if (!item.disabled) {

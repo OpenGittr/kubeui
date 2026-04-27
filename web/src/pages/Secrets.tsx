@@ -1,13 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { SecretInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Lock } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Lock, LockOpen, Pencil, Plus, Save, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const SECRET_SORTERS = {
+  name: (s: SecretInfo) => s.name,
+  namespace: (s: SecretInfo) => s.namespace,
+  type: (s: SecretInfo) => s.type,
+  keys: (s: SecretInfo) => s.keys.length,
+  age: (s: SecretInfo) => -ageSeconds(s.age),
+};
+
+const SECRET_CHECKS = [
+  { verb: 'patch', group: '', resource: 'secrets' },
+  { verb: 'delete', group: '', resource: 'secrets' },
+];
 
 interface SecretsProps {
   namespace?: string;
@@ -42,6 +59,230 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function EditableSecretData({
+  namespace,
+  name,
+  data,
+  deletableKey,
+  setDeletableKey,
+}: {
+  namespace: string;
+  name: string;
+  data: Record<string, string>;
+  deletableKey: string | null;
+  setDeletableKey: (k: string | null) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { addToast } = useToast();
+  const { can } = usePermissions(namespace, SECRET_CHECKS);
+  const canPatch = can('patch', '', 'secrets');
+  const patchTitle = canPatch ? undefined : 'Requires patch on secrets';
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [addingKey, setAddingKey] = useState(false);
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+
+  const keys = Object.keys(data).sort();
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['secret-details', namespace, name] });
+    queryClient.invalidateQueries({ queryKey: ['secrets'] });
+  };
+
+  const upsertMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) =>
+      api.secrets.upsertKey(namespace, name, key, value),
+    onSuccess: (_, { key }) => {
+      addToast(`Saved key "${key}"`, 'success');
+      setEditingKey(null);
+      setAddingKey(false);
+      setNewKey('');
+      setNewValue('');
+      invalidate();
+    },
+    onError: (err: Error) => addToast(`Save failed: ${err.message}`, 'error'),
+  });
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (key: string) => api.secrets.deleteKey(namespace, name, key),
+    onSuccess: (_, key) => {
+      addToast(`Removed key "${key}"`, 'success');
+      setDeletableKey(null);
+      invalidate();
+    },
+    onError: (err: Error) => {
+      addToast(`Delete failed: ${err.message}`, 'error');
+      setDeletableKey(null);
+    },
+  });
+
+  const toggleLock = (key: string) => {
+    setUnlocked(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const startEdit = (key: string) => {
+    setEditingKey(key);
+    setDraft(data[key] ?? '');
+    setUnlocked(prev => new Set(prev).add(key));
+  };
+
+  return (
+    <div className="border border-gray-200 rounded overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
+        <div className="text-xs font-medium text-gray-600">Data</div>
+        {!addingKey && (
+          <button
+            onClick={() => setAddingKey(true)}
+            disabled={!canPatch}
+            title={patchTitle}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-3 h-3" />
+            Add key
+          </button>
+        )}
+      </div>
+
+      {addingKey && (
+        <div className="p-3 bg-blue-50/40 border-b border-blue-100 space-y-2">
+          <input
+            autoFocus
+            value={newKey}
+            onChange={e => setNewKey(e.target.value)}
+            placeholder="key (e.g. GITHUB_APP_ID)"
+            className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          <textarea
+            value={newValue}
+            onChange={e => setNewValue(e.target.value)}
+            placeholder="plaintext value (will be base64-encoded server-side)"
+            rows={4}
+            className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => { setAddingKey(false); setNewKey(''); setNewValue(''); }}
+              className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+            >
+              <XCircle className="w-3 h-3" />
+              Cancel
+            </button>
+            <button
+              disabled={!newKey || upsertMutation.isPending}
+              onClick={() => upsertMutation.mutate({ key: newKey, value: newValue })}
+              className="px-2 py-1 text-xs bg-blue-600 text-white hover:bg-blue-700 rounded flex items-center gap-1 disabled:opacity-50"
+            >
+              <Save className="w-3 h-3" />
+              {upsertMutation.isPending ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {keys.length === 0 && !addingKey ? (
+        <div className="px-3 py-4 text-xs text-gray-500 text-center">No data keys</div>
+      ) : (
+        <table className="w-full text-xs">
+          <tbody>
+            {keys.map((key, idx) => {
+              const isUnlocked = unlocked.has(key);
+              const isEditing = editingKey === key;
+              return (
+                <tr key={key} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="px-3 py-2 font-mono font-medium text-gray-800 align-top whitespace-nowrap" style={{ maxWidth: '40%' }}>
+                    {key}
+                  </td>
+                  <td className="py-2 text-gray-300 align-top text-center w-4">|</td>
+                  <td className="px-3 py-2 font-mono text-gray-600 break-all align-top">
+                    <div className="flex items-start gap-1.5">
+                      <button
+                        onClick={() => toggleLock(key)}
+                        className="p-0.5 hover:bg-yellow-100 rounded flex-shrink-0 mt-0.5"
+                        title={isUnlocked ? 'Hide value' : 'Show value'}
+                      >
+                        {isUnlocked ? <LockOpen className="w-3 h-3 text-yellow-600" /> : <Lock className="w-3 h-3 text-yellow-600" />}
+                      </button>
+                      {isEditing ? (
+                        <div className="flex-1 space-y-2">
+                          <textarea
+                            autoFocus
+                            value={draft}
+                            onChange={e => setDraft(e.target.value)}
+                            rows={Math.min(10, Math.max(3, draft.split('\n').length))}
+                            className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => { setEditingKey(null); setDraft(''); }}
+                              className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1"
+                            >
+                              <XCircle className="w-3 h-3" />
+                              Cancel
+                            </button>
+                            <button
+                              disabled={upsertMutation.isPending}
+                              onClick={() => upsertMutation.mutate({ key, value: draft })}
+                              className="px-2 py-1 text-xs bg-blue-600 text-white hover:bg-blue-700 rounded flex items-center gap-1 disabled:opacity-50"
+                            >
+                              <Save className="w-3 h-3" />
+                              {upsertMutation.isPending ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="flex-1">
+                          {isUnlocked
+                            ? (data[key] || <span className="text-gray-400">-</span>)
+                            : <span className="text-gray-400">••••••••</span>}
+                        </span>
+                      )}
+                      {!isEditing && canPatch && (
+                        <div className="flex-shrink-0 flex gap-1">
+                          <button
+                            onClick={() => startEdit(key)}
+                            className="p-0.5 hover:bg-blue-100 rounded"
+                            title="Edit value"
+                          >
+                            <Pencil className="w-3 h-3 text-blue-600" />
+                          </button>
+                          <button
+                            onClick={() => setDeletableKey(key)}
+                            className="p-0.5 hover:bg-red-100 rounded"
+                            title="Remove key"
+                          >
+                            <Trash2 className="w-3 h-3 text-red-600" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      <ConfirmDialog
+        isOpen={!!deletableKey}
+        title="Remove Key"
+        message={`Remove key "${deletableKey}" from secret "${name}"?`}
+        confirmLabel="Remove"
+        variant="danger"
+        isLoading={deleteKeyMutation.isPending}
+        onConfirm={() => deletableKey && deleteKeyMutation.mutate(deletableKey)}
+        onCancel={() => setDeletableKey(null)}
+      />
+    </div>
+  );
+}
+
 function SecretDetailsPanel({
   secret,
   onClose,
@@ -51,6 +292,7 @@ function SecretDetailsPanel({
   onClose: () => void;
   onViewYaml: () => void;
 }) {
+  const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
   const { data: secretDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['secret-details', secret.namespace, secret.name],
     queryFn: () => api.secrets.get(secret.namespace, secret.name),
@@ -113,13 +355,23 @@ function SecretDetailsPanel({
           )}
         </div>
 
-        {/* Data, Labels & Annotations */}
+        {/* Editable data */}
         {detailsLoading ? (
           <p className="text-gray-500 text-sm">Loading...</p>
         ) : (
+          <EditableSecretData
+            namespace={secret.namespace}
+            name={secret.name}
+            data={details.data || {}}
+            deletableKey={keyToDelete}
+            setDeletableKey={setKeyToDelete}
+          />
+        )}
+
+        {/* Labels & Annotations */}
+        {!detailsLoading && (
           <MetadataTabs
             tabs={[
-              { key: 'data', label: 'Data', secretData: details.data },
               { key: 'labels', label: 'Labels', data: details.labels },
               { key: 'annotations', label: 'Annotations', data: details.annotations },
             ]}
@@ -170,6 +422,9 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
   const [yamlSecret, setYamlSecret] = useState<SecretInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SecretInfo | null>(null);
   const [selectedSecret, setSelectedSecret] = useState<SecretInfo | null>(null);
+  const { can } = usePermissions(namespace, SECRET_CHECKS);
+  const canDelete = can('delete', '', 'secrets');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on secrets';
 
   const { data: secrets, isLoading, error } = useQuery({
     queryKey: ['secrets', namespace],
@@ -177,6 +432,8 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(secrets, selectedSecret, setSelectedSecret);
+  const sort = useTableSort(secrets, SECRET_SORTERS);
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.secrets.delete(ns, name),
@@ -218,16 +475,16 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Type</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Keys</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="type" label="Type" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="keys" label="Keys" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {secrets?.map((secret) => (
+            {sort.sorted.map((secret) => (
               <tr
                 key={`${secret.namespace}/${secret.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedSecret?.name === secret.name && selectedSecret?.namespace === secret.namespace ? 'bg-blue-50' : ''}`}
@@ -265,6 +522,8 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(secret),
                       },
                     ]}

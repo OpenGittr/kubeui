@@ -2,9 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -33,6 +36,7 @@ type NodeInfo struct {
 	Pods             NodeResource      `json:"pods"`
 	Labels           map[string]string `json:"labels"`
 	Conditions       []NodeCondition   `json:"conditions"`
+	Unschedulable    bool              `json:"unschedulable"`
 }
 
 type NodeResource struct {
@@ -160,6 +164,159 @@ func (h *NodeHandler) List(ctx *gofr.Context) (interface{}, error) {
 			Pods:             NodeResource{Capacity: podsCapacity, Requested: currentPods},
 			Labels:           node.Labels,
 			Conditions:       conditions,
+			Unschedulable:    node.Spec.Unschedulable,
+		})
+	}
+
+	return result, nil
+}
+
+type cordonRequest struct {
+	Unschedulable bool `json:"unschedulable"`
+}
+
+// SetCordon sets node.spec.unschedulable. true = cordon (no new pods),
+// false = uncordon. Draining existing pods is intentionally not implemented
+// here — it requires orchestration (eviction loop) and is better done via
+// kubectl or a dedicated tool.
+func (h *NodeHandler) SetCordon(ctx *gofr.Context) (interface{}, error) {
+	name := ctx.PathParam("name")
+
+	var req cordonRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"spec": map[string]interface{}{"unschedulable": req.Unschedulable},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.CoreV1().Nodes().Patch(
+		context.Background(), name, types.MergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+
+	action := "uncordoned"
+	if req.Unschedulable {
+		action = "cordoned"
+	}
+	return map[string]string{"message": fmt.Sprintf("Node %s %s", name, action)}, nil
+}
+
+type BinPackingNode struct {
+	Name              string `json:"name"`
+	AllocatableCPU    int64  `json:"allocatableCPU"`    // millicores
+	AllocatableMemory int64  `json:"allocatableMemory"` // bytes
+	AllocatablePods   int64  `json:"allocatablePods"`
+	UsageCPU          int64  `json:"usageCPU"`    // 0 if metrics-server unavailable
+	UsageMemory       int64  `json:"usageMemory"` // 0 if metrics-server unavailable
+}
+
+type BinPackingPod struct {
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	Status        string `json:"status"`
+	CPURequest    int64  `json:"cpuRequest"`    // millicores
+	MemoryRequest int64  `json:"memoryRequest"` // bytes
+	CPUUsage      int64  `json:"cpuUsage"`      // 0 if metrics-server unavailable for this pod
+	MemoryUsage   int64  `json:"memoryUsage"`
+}
+
+type BinPackingResponse struct {
+	Node             BinPackingNode  `json:"node"`
+	Pods             []BinPackingPod `json:"pods"`
+	MetricsAvailable bool            `json:"metricsAvailable"`
+}
+
+// BinPacking returns the per-pod CPU/memory request and actual-usage breakdown
+// for a single node, alongside the node's allocatable capacity. Used by the
+// frontend's bin-packing visualization to show who's eating the node and which
+// pods are over-provisioned (large request, tiny actual usage).
+func (h *NodeHandler) BinPacking(ctx *gofr.Context) (interface{}, error) {
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	node, err := client.CoreV1().Nodes().Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	// All pods scheduled on this node (filter by spec.nodeName server-side).
+	pods, err := client.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", name),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Best-effort metrics: if metrics-server isn't installed/reachable we
+	// still return capacity + requests so the request bars work.
+	usageByPod := map[string]struct{ cpu, mem int64 }{}
+	var nodeCPUUsage, nodeMemUsage int64
+	metricsAvailable := false
+	if mc, err := h.k8s.GetMetricsClient(); err == nil {
+		if nm, err := mc.MetricsV1beta1().NodeMetricses().Get(context.Background(), name, metav1.GetOptions{}); err == nil {
+			nodeCPUUsage = nm.Usage.Cpu().MilliValue()
+			nodeMemUsage = nm.Usage.Memory().Value()
+			metricsAvailable = true
+		}
+		if pmList, err := mc.MetricsV1beta1().PodMetricses("").List(context.Background(), metav1.ListOptions{}); err == nil {
+			for _, pm := range pmList.Items {
+				var cpu, mem int64
+				for _, c := range pm.Containers {
+					cpu += c.Usage.Cpu().MilliValue()
+					mem += c.Usage.Memory().Value()
+				}
+				usageByPod[pm.Namespace+"/"+pm.Name] = struct{ cpu, mem int64 }{cpu, mem}
+			}
+			metricsAvailable = true
+		}
+	}
+
+	result := BinPackingResponse{
+		Node: BinPackingNode{
+			Name:              node.Name,
+			AllocatableCPU:    node.Status.Allocatable.Cpu().MilliValue(),
+			AllocatableMemory: node.Status.Allocatable.Memory().Value(),
+			AllocatablePods:   node.Status.Allocatable.Pods().Value(),
+			UsageCPU:          nodeCPUUsage,
+			UsageMemory:       nodeMemUsage,
+		},
+		MetricsAvailable: metricsAvailable,
+	}
+
+	for _, pod := range pods.Items {
+		// Skip terminated pods — they don't consume node capacity.
+		if pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
+			continue
+		}
+		var cpuReq, memReq int64
+		for _, c := range pod.Spec.Containers {
+			cpuReq += c.Resources.Requests.Cpu().MilliValue()
+			memReq += c.Resources.Requests.Memory().Value()
+		}
+		usage := usageByPod[pod.Namespace+"/"+pod.Name]
+		result.Pods = append(result.Pods, BinPackingPod{
+			Namespace:     pod.Namespace,
+			Name:          pod.Name,
+			Status:        string(pod.Status.Phase),
+			CPURequest:    cpuReq,
+			MemoryRequest: memReq,
+			CPUUsage:      usage.cpu,
+			MemoryUsage:   usage.mem,
 		})
 	}
 

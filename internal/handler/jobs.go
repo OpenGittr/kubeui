@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -193,6 +195,49 @@ func (h *JobHandler) DeleteCronJob(ctx *gofr.Context) (interface{}, error) {
 	}
 
 	return map[string]string{"message": fmt.Sprintf("CronJob %s deleted", name)}, nil
+}
+
+type updateCronJobRequest struct {
+	Suspend  *bool   `json:"suspend,omitempty"`
+	Schedule *string `json:"schedule,omitempty"`
+}
+
+// UpdateCronJob edits the CronJob spec.suspend and/or spec.schedule fields.
+func (h *JobHandler) UpdateCronJob(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req updateCronJobRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.Suspend == nil && req.Schedule == nil {
+		return nil, fmt.Errorf("suspend or schedule must be provided")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	spec := map[string]interface{}{}
+	if req.Suspend != nil {
+		spec["suspend"] = *req.Suspend
+	}
+	if req.Schedule != nil {
+		spec["schedule"] = *req.Schedule
+	}
+	body, err := json.Marshal(map[string]interface{}{"spec": spec})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.BatchV1().CronJobs(namespace).Patch(
+		context.Background(), name, types.MergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("CronJob %s updated", name)}, nil
 }
 
 // GetJob returns details of a specific job

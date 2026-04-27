@@ -1,10 +1,33 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { NodeInfo, NodeResource } from '../services/api';
 import { useState } from 'react';
-import { RefreshCw, X, FileCode, ChevronRight } from 'lucide-react';
+import { RefreshCw, X, FileCode, ChevronRight, Info, Ban, Play } from 'lucide-react';
 import { YamlModal } from '../components/YamlModal';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { ActionMenu } from '../components/ActionMenu';
+import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+import { BinPackingSection } from '../components/BinPackingSection';
+
+const NODE_SORTERS = {
+  name: (n: NodeInfo) => n.name,
+  status: (n: NodeInfo) => n.status,
+  roles: (n: NodeInfo) => n.roles,
+  version: (n: NodeInfo) => n.version,
+  internalIP: (n: NodeInfo) => n.internalIP,
+  cpu: (n: NodeInfo) => n.cpu.capacity > 0 ? n.cpu.requested / n.cpu.capacity : 0,
+  memory: (n: NodeInfo) => n.memory.capacity > 0 ? n.memory.requested / n.memory.capacity : 0,
+  pods: (n: NodeInfo) => n.pods.requested,
+  age: (n: NodeInfo) => -ageSeconds(n.age),
+};
+
+const NODE_CHECKS = [
+  { verb: 'patch', group: '', resource: 'nodes', namespace: '' },
+];
 
 // Formatting helpers
 function formatCPU(res: NodeResource): string {
@@ -207,6 +230,9 @@ function NodeDetailsPanel({ node, onClose, onViewYaml }: {
           </div>
         </div>
 
+        {/* Bin packing */}
+        <BinPackingSection nodeName={node.name} />
+
         {/* Conditions */}
         <div>
           <h3 className="text-sm font-semibold text-gray-700 mb-2">Conditions</h3>
@@ -246,8 +272,25 @@ function NodeDetailsPanel({ node, onClose, onViewYaml }: {
 
 export function Nodes({ isConnected = true }: NodesProps) {
   const queryClient = useQueryClient();
+  const { addToast } = useToast();
   const [selectedNode, setSelectedNode] = useState<NodeInfo | null>(null);
   const [yamlNode, setYamlNode] = useState<NodeInfo | null>(null);
+
+  // Nodes are cluster-scoped; SelfSubjectRulesReview still returns
+  // cluster-wide rules when queried against any namespace, so use "default".
+  const { can } = usePermissions('default', NODE_CHECKS);
+  const canPatchNodes = can('patch', '', 'nodes');
+  const cordonTitle = canPatchNodes ? undefined : 'Requires patch on nodes';
+
+  const cordonMutation = useMutation({
+    mutationFn: ({ name, unschedulable }: { name: string; unschedulable: boolean }) =>
+      api.nodes.setCordon(name, unschedulable),
+    onSuccess: (_, { name, unschedulable }) => {
+      addToast(`Node ${name} ${unschedulable ? 'cordoned' : 'uncordoned'}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['nodes'] });
+    },
+    onError: (err: Error) => addToast(`Failed: ${err.message}`, 'error'),
+  });
 
   const { data: nodes, isLoading, error } = useQuery({
     queryKey: ['nodes'],
@@ -255,6 +298,8 @@ export function Nodes({ isConnected = true }: NodesProps) {
     refetchInterval: isConnected ? 10000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(nodes, selectedNode, setSelectedNode);
+  const sort = useTableSort(nodes, NODE_SORTERS);
 
   if (!isConnected) {
     return <div className="text-gray-500">Not connected to cluster</div>;
@@ -294,19 +339,20 @@ export function Nodes({ isConnected = true }: NodesProps) {
         <table className="w-full min-w-max">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Status</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Roles</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Version</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Internal IP</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">CPU</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Memory</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Pods</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="status" label="Status" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="roles" label="Roles" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="version" label="Version" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="internalIP" label="Internal IP" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="cpu" label="CPU" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="memory" label="Memory" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="pods" label="Pods" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {nodes?.map((node) => (
+            {sort.sorted.map((node) => (
               <tr
                 key={node.name}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedNode?.name === node.name ? 'bg-blue-50' : ''}`}
@@ -330,6 +376,29 @@ export function Nodes({ isConnected = true }: NodesProps) {
                 <td className="px-4 py-3 text-sm whitespace-nowrap">{formatMemory(node.memory)}</td>
                 <td className="px-4 py-3 text-sm whitespace-nowrap">{formatPods(node.pods)}</td>
                 <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{node.age}</td>
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <ActionMenu
+                    items={[
+                      {
+                        label: 'Details',
+                        icon: <Info className="w-4 h-4" />,
+                        onClick: () => setSelectedNode(node),
+                      },
+                      {
+                        label: node.unschedulable ? 'Uncordon' : 'Cordon',
+                        icon: node.unschedulable ? <Play className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
+                        disabled: !canPatchNodes || cordonMutation.isPending,
+                        title: cordonTitle,
+                        onClick: () => cordonMutation.mutate({ name: node.name, unschedulable: !node.unschedulable }),
+                      },
+                      {
+                        label: 'View YAML',
+                        icon: <FileCode className="w-4 h-4" />,
+                        onClick: () => setYamlNode(node),
+                      },
+                    ]}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

@@ -7,10 +7,29 @@ import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { TerminalModal } from '../components/TerminalModal';
+import { MultiTerminal } from '../components/MultiTerminal';
+import type { TerminalSession } from '../components/MultiTerminal';
 import { PortForwardModal } from '../components/PortForwardModal';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { usePermissions } from '../hooks/usePermissions';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+
+const POD_CHECKS = [
+  { verb: 'delete', group: '', resource: 'pods' },
+];
+
+const POD_SORTERS = {
+  name: (p: PodInfo) => p.name,
+  namespace: (p: PodInfo) => p.namespace,
+  status: (p: PodInfo) => p.status,
+  ready: (p: PodInfo) => p.ready,
+  restarts: (p: PodInfo) => p.restarts,
+  age: (p: PodInfo) => -ageSeconds(p.age), // newest first
+  node: (p: PodInfo) => p.node ?? '',
+};
 
 interface PodsProps {
   namespace?: string;
@@ -312,8 +331,42 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   const [yamlPod, setYamlPod] = useState<PodInfo | null>(null);
   const [selectedPod, setSelectedPod] = useState<PodInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PodInfo | null>(null);
-  const [terminalPod, setTerminalPod] = useState<PodInfo | null>(null);
+  const { can } = usePermissions(namespace, POD_CHECKS);
+  const canDelete = can('delete', '', 'pods');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on pods';
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
+  const [terminalMinimized, setTerminalMinimized] = useState(false);
   const [portForwardPod, setPortForwardPod] = useState<PodInfo | null>(null);
+
+  const openTerminal = (pod: PodInfo, containerName?: string) => {
+    const sessionId = `${pod.namespace}/${pod.name}${containerName ? `/${containerName}` : ''}-${Date.now()}`;
+    setTerminalSessions((prev) => [
+      ...prev,
+      {
+        id: sessionId,
+        namespace: pod.namespace,
+        podName: pod.name,
+        containerName,
+      },
+    ]);
+    setTerminalMinimized(false); // Expand terminal when adding new session
+  };
+
+  const closeTerminal = (sessionId: string) => {
+    setTerminalSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  };
+
+  const reconnectTerminal = (sessionId: string) => {
+    setTerminalSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId ? { ...s, reconnectKey: (s.reconnectKey || 0) + 1 } : s
+      )
+    );
+  };
+
+  const closeAllTerminals = () => {
+    setTerminalSessions([]);
+  };
 
   const { data: pods, isLoading, error } = useQuery({
     queryKey: ['pods', namespace],
@@ -321,6 +374,8 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(pods, selectedPod, setSelectedPod);
+  const sort = useTableSort(pods, POD_SORTERS);
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.pods.delete(ns, name),
@@ -362,18 +417,18 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Status</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ready</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Restarts</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Node</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="status" label="Status" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="restarts" label="Restarts" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="node" label="Node" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {pods?.map((pod) => (
+            {sort.sorted.map((pod) => (
               <tr
                 key={`${pod.namespace}/${pod.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedPod?.name === pod.name && selectedPod?.namespace === pod.namespace ? 'bg-blue-50' : ''}`}
@@ -404,7 +459,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
                       {
                         label: 'Shell',
                         icon: <Terminal className="w-4 h-4" />,
-                        onClick: () => setTerminalPod(pod),
+                        onClick: () => openTerminal(pod),
                       },
                       {
                         label: 'Port Forward',
@@ -425,6 +480,8 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(pod),
                       },
                     ]}
@@ -480,11 +537,14 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
         onCancel={() => setDeleteTarget(null)}
       />
 
-      {terminalPod && (
-        <TerminalModal
-          namespace={terminalPod.namespace}
-          podName={terminalPod.name}
-          onClose={() => setTerminalPod(null)}
+      {terminalSessions.length > 0 && (
+        <MultiTerminal
+          sessions={terminalSessions}
+          onRemoveSession={closeTerminal}
+          onReconnectSession={reconnectTerminal}
+          onClose={closeAllTerminals}
+          isMinimized={terminalMinimized}
+          onToggleMinimize={() => setTerminalMinimized((m) => !m)}
         />
       )}
 

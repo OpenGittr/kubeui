@@ -3,6 +3,11 @@ import { api } from '../services/api';
 import type { IngressInfo } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
 import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+
+const ING_CHECKS = [
+  { verb: 'delete', group: 'networking.k8s.io', resource: 'ingresses' },
+];
 
 interface IngressesProps {
   namespace?: string;
@@ -20,6 +25,9 @@ export function Ingresses({ namespace, isConnected = true }: IngressesProps) {
   });
 
   const { addToast } = useToast();
+  const { can } = usePermissions(namespace, ING_CHECKS);
+  const canDelete = can('delete', 'networking.k8s.io', 'ingresses');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on ingresses';
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.network.deleteIngress(ns, name),
@@ -47,6 +55,8 @@ export function Ingresses({ namespace, isConnected = true }: IngressesProps) {
       resourceType="ingresses"
       getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
       onDelete={(item: IngressInfo) => deleteMutation.mutate({ ns: item.namespace, name: item.name })}
+      canDelete={canDelete}
+      deleteTitle={deleteTitle}
       columns={[
         { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
         { key: 'namespace', header: 'Namespace', className: 'text-gray-600' },

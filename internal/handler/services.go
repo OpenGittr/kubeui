@@ -2,11 +2,15 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"gofr.dev/pkg/gofr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -116,6 +120,81 @@ func (h *ServiceHandler) Delete(ctx *gofr.Context) (interface{}, error) {
 	}
 
 	return map[string]string{"message": fmt.Sprintf("Service %s deleted", name)}, nil
+}
+
+type servicePortReq struct {
+	Name       string `json:"name,omitempty"`
+	Port       int32  `json:"port"`
+	TargetPort string `json:"targetPort,omitempty"`
+	NodePort   int32  `json:"nodePort,omitempty"`
+	Protocol   string `json:"protocol,omitempty"`
+}
+
+type setServicePortsRequest struct {
+	Ports []servicePortReq `json:"ports"`
+}
+
+// SetPorts replaces a Service's ports array. Port lists are tricky to patch
+// piecewise (strategic-merge works but still requires name as the merge key),
+// so we accept the full new list from the UI and replace via merge-patch.
+func (h *ServiceHandler) SetPorts(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req setServicePortsRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if len(req.Ports) == 0 {
+		return nil, fmt.Errorf("at least one port is required")
+	}
+
+	ports := make([]corev1.ServicePort, 0, len(req.Ports))
+	for i, p := range req.Ports {
+		if p.Port == 0 {
+			return nil, fmt.Errorf("port at index %d: port is required", i)
+		}
+		sp := corev1.ServicePort{
+			Name:     p.Name,
+			Port:     p.Port,
+			NodePort: p.NodePort,
+		}
+		switch strings.ToUpper(p.Protocol) {
+		case "", "TCP":
+			sp.Protocol = corev1.ProtocolTCP
+		case "UDP":
+			sp.Protocol = corev1.ProtocolUDP
+		case "SCTP":
+			sp.Protocol = corev1.ProtocolSCTP
+		default:
+			return nil, fmt.Errorf("port at index %d: unknown protocol %q", i, p.Protocol)
+		}
+		if p.TargetPort != "" {
+			sp.TargetPort = intstr.Parse(p.TargetPort)
+		} else {
+			sp.TargetPort = intstr.FromInt32(p.Port)
+		}
+		ports = append(ports, sp)
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"spec": map[string]interface{}{"ports": ports},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.CoreV1().Services(namespace).Patch(
+		context.Background(), name, types.MergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("Service %s ports updated", name)}, nil
 }
 
 // Get returns details of a specific service

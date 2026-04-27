@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DeploymentInfo } from '../services/api';
-import { RefreshCw, RotateCcw, Scale, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
+import { RefreshCw, RotateCcw, Scale, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
@@ -9,6 +9,25 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard, PodContainersGroup } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { SetImageModal } from '../components/SetImageModal';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const DEPLOYMENT_SORTERS = {
+  name: (d: DeploymentInfo) => d.name,
+  namespace: (d: DeploymentInfo) => d.namespace,
+  ready: (d: DeploymentInfo) => parseInt(d.ready.split('/')[0] || '0', 10),
+  upToDate: (d: DeploymentInfo) => d.upToDate,
+  available: (d: DeploymentInfo) => d.available,
+  age: (d: DeploymentInfo) => -ageSeconds(d.age),
+};
+
+const DEPLOYMENT_CHECKS = [
+  { verb: 'patch', group: 'apps', resource: 'deployments' },
+  { verb: 'delete', group: 'apps', resource: 'deployments' },
+];
 
 interface DeploymentsProps {
   namespace?: string;
@@ -165,6 +184,7 @@ function DeploymentDetailsPanel({
                 <PodContainersGroup
                   key={podName}
                   podName={podName}
+                  namespace={deployment.namespace}
                   containers={containers}
                 />
               ))}
@@ -273,6 +293,12 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
   const [restartTarget, setRestartTarget] = useState<DeploymentInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeploymentInfo | null>(null);
   const [selectedDeployment, setSelectedDeployment] = useState<DeploymentInfo | null>(null);
+  const [imageTarget, setImageTarget] = useState<DeploymentInfo | null>(null);
+  const { can } = usePermissions(namespace, DEPLOYMENT_CHECKS);
+  const canPatch = can('patch', 'apps', 'deployments');
+  const canDelete = can('delete', 'apps', 'deployments');
+  const patchTitle = canPatch ? undefined : 'Requires patch on deployments';
+  const deleteTitle = canDelete ? undefined : 'Requires delete on deployments';
 
   const { data: deployments, isLoading, error } = useQuery({
     queryKey: ['deployments', namespace],
@@ -280,6 +306,8 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(deployments, selectedDeployment, setSelectedDeployment);
+  const sort = useTableSort(deployments, DEPLOYMENT_SORTERS);
 
   const restartMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) =>
@@ -334,17 +362,17 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ready</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Up-to-date</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Available</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="upToDate" label="Up-to-date" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="available" label="Available" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {deployments?.map((dep) => (
+            {sort.sorted.map((dep) => (
               <tr
                 key={`${dep.namespace}/${dep.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedDeployment?.name === dep.name && selectedDeployment?.namespace === dep.namespace ? 'bg-blue-50' : ''}`}
@@ -372,11 +400,22 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                       {
                         label: 'Scale',
                         icon: <Scale className="w-4 h-4" />,
+                        disabled: !canPatch,
+                        title: patchTitle,
                         onClick: () => setScaleDeployment(dep),
+                      },
+                      {
+                        label: 'Set image',
+                        icon: <Box className="w-4 h-4" />,
+                        disabled: !canPatch,
+                        title: patchTitle,
+                        onClick: () => setImageTarget(dep),
                       },
                       {
                         label: 'Restart',
                         icon: <RotateCcw className="w-4 h-4" />,
+                        disabled: !canPatch,
+                        title: patchTitle,
                         onClick: () => setRestartTarget(dep),
                       },
                       {
@@ -388,6 +427,8 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(dep),
                       },
                     ]}
@@ -407,6 +448,21 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
         <ScaleModal
           deployment={scaleDeployment}
           onClose={() => setScaleDeployment(null)}
+        />
+      )}
+      {imageTarget && (
+        <SetImageModal
+          kind="deployment"
+          namespace={imageTarget.namespace}
+          name={imageTarget.name}
+          onClose={() => setImageTarget(null)}
+          onSaved={() => setImageTarget(null)}
+          fetchContainers={async () => {
+            const d = await api.deployments.get(imageTarget.namespace, imageTarget.name);
+            return (d.containerDetails || []).map(c => ({ name: c.name, image: c.image }));
+          }}
+          setImage={api.deployments.setImage}
+          invalidateKeys={[['deployments'], ['deployment-details', imageTarget.namespace, imageTarget.name]]}
         />
       )}
       {yamlDeployment && (

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DaemonSetInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
@@ -9,6 +9,26 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { SetImageModal } from '../components/SetImageModal';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const DS_SORTERS = {
+  name: (d: DaemonSetInfo) => d.name,
+  namespace: (d: DaemonSetInfo) => d.namespace,
+  desired: (d: DaemonSetInfo) => d.desired,
+  current: (d: DaemonSetInfo) => d.current,
+  ready: (d: DaemonSetInfo) => d.ready,
+  upToDate: (d: DaemonSetInfo) => d.upToDate,
+  age: (d: DaemonSetInfo) => -ageSeconds(d.age),
+};
+
+const DS_CHECKS = [
+  { verb: 'patch', group: 'apps', resource: 'daemonsets' },
+  { verb: 'delete', group: 'apps', resource: 'daemonsets' },
+];
 
 interface DaemonSetsProps {
   namespace?: string;
@@ -132,6 +152,7 @@ function DaemonSetDetailsPanel({
                         state={container.state}
                         restarts={container.restarts}
                         podName={container.podName}
+                        podNamespace={daemonset.namespace}
                         resources={{
                           cpu: container.cpu,
                           memory: container.memory,
@@ -243,6 +264,12 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
   const [yamlDaemonSet, setYamlDaemonSet] = useState<DaemonSetInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DaemonSetInfo | null>(null);
   const [selectedDaemonSet, setSelectedDaemonSet] = useState<DaemonSetInfo | null>(null);
+  const [imageTarget, setImageTarget] = useState<DaemonSetInfo | null>(null);
+  const { can } = usePermissions(namespace, DS_CHECKS);
+  const canPatch = can('patch', 'apps', 'daemonsets');
+  const canDelete = can('delete', 'apps', 'daemonsets');
+  const patchTitle = canPatch ? undefined : 'Requires patch on daemonsets';
+  const deleteTitle = canDelete ? undefined : 'Requires delete on daemonsets';
   const [showEmpty, setShowEmpty] = useState(false);
 
   const { data: daemonsets, isLoading, error } = useQuery({
@@ -251,6 +278,8 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(daemonsets, selectedDaemonSet, setSelectedDaemonSet);
+  // Sort runs over the filtered list so showEmpty toggle still works.
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.workloads.deleteDaemonSet(ns, name),
@@ -278,6 +307,7 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
   // Filter out DaemonSets with desired=0 unless showEmpty is true
   const filteredDaemonsets = daemonsets?.filter(ds => showEmpty || ds.desired > 0);
   const hiddenCount = (daemonsets?.length || 0) - (filteredDaemonsets?.length || 0);
+  const sort = useTableSort(filteredDaemonsets, DS_SORTERS);
 
   return (
     <div>
@@ -306,19 +336,19 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Desired</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Current</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ready</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Up-to-date</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="desired" label="Desired" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="current" label="Current" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="upToDate" label="Up-to-date" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Node Selector</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filteredDaemonsets?.map((ds) => (
+            {sort.sorted.map((ds) => (
               <tr
                 key={`${ds.namespace}/${ds.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedDaemonSet?.name === ds.name && selectedDaemonSet?.namespace === ds.namespace ? 'bg-blue-50' : ''}`}
@@ -348,6 +378,13 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
                         onClick: () => setSelectedDaemonSet(ds),
                       },
                       {
+                        label: 'Set image',
+                        icon: <Box className="w-4 h-4" />,
+                        disabled: !canPatch,
+                        title: patchTitle,
+                        onClick: () => setImageTarget(ds),
+                      },
+                      {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlDaemonSet(ds),
@@ -356,6 +393,8 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(ds),
                       },
                     ]}
@@ -379,6 +418,21 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
           namespace={yamlDaemonSet.namespace}
           name={yamlDaemonSet.name}
           onClose={() => setYamlDaemonSet(null)}
+        />
+      )}
+      {imageTarget && (
+        <SetImageModal
+          kind="daemonset"
+          namespace={imageTarget.namespace}
+          name={imageTarget.name}
+          onClose={() => setImageTarget(null)}
+          onSaved={() => setImageTarget(null)}
+          fetchContainers={async () => {
+            const d = await api.workloads.getDaemonSet(imageTarget.namespace, imageTarget.name);
+            return (d.containerDetails || []).map(c => ({ name: c.name, image: c.image }));
+          }}
+          setImage={api.workloads.setDaemonSetImage}
+          invalidateKeys={[['daemonsets'], ['daemonset-details', imageTarget.namespace, imageTarget.name]]}
         />
       )}
 

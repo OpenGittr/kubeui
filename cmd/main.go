@@ -24,7 +24,7 @@ import (
 var staticFiles embed.FS
 
 var (
-	version   = "0.1.3"
+	version   = "0.2.0"
 	port      = flag.String("port", "8080", "Port to run the server on")
 	noBrowser = flag.Bool("no-browser", false, "Don't open browser on start")
 )
@@ -100,6 +100,7 @@ func main() {
 	quotaHandler := handler.NewQuotaHandler(k8sManager)
 	searchHandler := handler.NewSearchHandler(k8sManager)
 	portForwardHandler := handler.NewPortForwardHandler(k8sManager)
+	permissionHandler := handler.NewPermissionHandler(k8sManager)
 
 	// Cluster routes
 	app.GET("/api/clusters", clusterHandler.List)
@@ -127,6 +128,7 @@ func main() {
 	app.GET("/api/deployments/{namespace}/{name}", deploymentHandler.Get)
 	app.GET("/api/deployments/{namespace}/{name}/events", deploymentHandler.Events)
 	app.PATCH("/api/deployments/{namespace}/{name}/scale", deploymentHandler.Scale)
+	app.PATCH("/api/deployments/{namespace}/{name}/image", deploymentHandler.SetImage)
 	app.POST("/api/deployments/{namespace}/{name}/restart", deploymentHandler.Restart)
 	app.DELETE("/api/deployments/{namespace}/{name}", deploymentHandler.Delete)
 
@@ -134,18 +136,23 @@ func main() {
 	app.GET("/api/services", serviceHandler.List)
 	app.GET("/api/services/{namespace}/{name}", serviceHandler.Get)
 	app.GET("/api/services/{namespace}/{name}/events", serviceHandler.Events)
+	app.PUT("/api/services/{namespace}/{name}/ports", serviceHandler.SetPorts)
 	app.DELETE("/api/services/{namespace}/{name}", serviceHandler.Delete)
 
 	// ConfigMap routes
 	app.GET("/api/configmaps", configMapHandler.List)
 	app.GET("/api/configmaps/{namespace}/{name}", configMapHandler.Get)
 	app.GET("/api/configmaps/{namespace}/{name}/events", configMapHandler.Events)
+	app.PATCH("/api/configmaps/{namespace}/{name}/keys", configMapHandler.UpsertKey)
+	app.DELETE("/api/configmaps/{namespace}/{name}/keys/{key}", configMapHandler.DeleteKey)
 	app.DELETE("/api/configmaps/{namespace}/{name}", configMapHandler.Delete)
 
 	// Secret routes
 	app.GET("/api/secrets", secretHandler.List)
 	app.GET("/api/secrets/{namespace}/{name}", secretHandler.Get)
 	app.GET("/api/secrets/{namespace}/{name}/events", secretHandler.Events)
+	app.PATCH("/api/secrets/{namespace}/{name}/keys", secretHandler.UpsertKey)
+	app.DELETE("/api/secrets/{namespace}/{name}/keys/{key}", secretHandler.DeleteKey)
 	app.DELETE("/api/secrets/{namespace}/{name}", secretHandler.Delete)
 
 	// Job routes
@@ -156,6 +163,7 @@ func main() {
 	app.GET("/api/cronjobs/{namespace}/{name}", jobHandler.GetCronJob)
 	app.GET("/api/cronjobs/{namespace}/{name}/events", jobHandler.CronJobEvents)
 	app.GET("/api/cronjobs/{namespace}/{name}/jobs", jobHandler.CronJobJobs)
+	app.PATCH("/api/cronjobs/{namespace}/{name}", jobHandler.UpdateCronJob)
 	app.DELETE("/api/jobs/{namespace}/{name}", jobHandler.DeleteJob)
 	app.DELETE("/api/cronjobs/{namespace}/{name}", jobHandler.DeleteCronJob)
 
@@ -176,6 +184,8 @@ func main() {
 
 	// Node routes
 	app.GET("/api/nodes", nodeHandler.List)
+	app.PATCH("/api/nodes/{name}/cordon", nodeHandler.SetCordon)
+	app.GET("/api/nodes/{name}/binpacking", nodeHandler.BinPacking)
 
 	// Workload routes (DaemonSets, StatefulSets, ReplicaSets)
 	app.GET("/api/daemonsets", workloadHandler.ListDaemonSets)
@@ -187,6 +197,8 @@ func main() {
 	app.GET("/api/replicasets", workloadHandler.ListReplicaSets)
 	app.GET("/api/replicasets/{namespace}/{name}", workloadHandler.GetReplicaSet)
 	app.GET("/api/replicasets/{namespace}/{name}/events", workloadHandler.ReplicaSetEvents)
+	app.PATCH("/api/daemonsets/{namespace}/{name}/image", workloadHandler.SetDaemonSetImage)
+	app.PATCH("/api/statefulsets/{namespace}/{name}/image", workloadHandler.SetStatefulSetImage)
 	app.DELETE("/api/daemonsets/{namespace}/{name}", workloadHandler.DeleteDaemonSet)
 	app.DELETE("/api/statefulsets/{namespace}/{name}", workloadHandler.DeleteStatefulSet)
 	app.DELETE("/api/replicasets/{namespace}/{name}", workloadHandler.DeleteReplicaSet)
@@ -202,6 +214,7 @@ func main() {
 	app.GET("/api/hpas", hpaHandler.List)
 	app.GET("/api/hpas/{namespace}/{name}", hpaHandler.Get)
 	app.GET("/api/hpas/{namespace}/{name}/events", hpaHandler.Events)
+	app.PATCH("/api/hpas/{namespace}/{name}", hpaHandler.Update)
 
 	// Event routes
 	app.GET("/api/events", eventHandler.List)
@@ -216,6 +229,10 @@ func main() {
 	// Quota routes
 	app.GET("/api/resourcequotas", quotaHandler.ListResourceQuotas)
 	app.GET("/api/limitranges", quotaHandler.ListLimitRanges)
+
+	// Permissions routes
+	app.GET("/api/permissions", permissionHandler.Get)
+	app.POST("/api/permissions/check", permissionHandler.Check)
 
 	// Search route
 	app.GET("/api/search", searchHandler.Search)

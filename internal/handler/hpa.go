@@ -2,16 +2,68 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"gofr.dev/pkg/gofr"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
 
 type HPAHandler struct {
 	k8s *service.K8sManager
+}
+
+// buildHPAMetrics extracts the (targetsString, structuredMetrics) pair from an
+// HPA's spec + status. Used by both List and Get so the list table can render
+// per-metric chips with bars instead of the bare kubectl-style string.
+func buildHPAMetrics(spec autoscalingv2.HorizontalPodAutoscalerSpec, status autoscalingv2.HorizontalPodAutoscalerStatus) (string, []HPAMetric) {
+	var targets []string
+	var metrics []HPAMetric
+	for _, metric := range spec.Metrics {
+		if metric.Resource == nil {
+			continue
+		}
+		target := ""
+		var targetPercent *int32
+		if metric.Resource.Target.AverageUtilization != nil {
+			target = fmt.Sprintf("%d%%", *metric.Resource.Target.AverageUtilization)
+			targetPercent = metric.Resource.Target.AverageUtilization
+		} else if metric.Resource.Target.AverageValue != nil {
+			target = metric.Resource.Target.AverageValue.String()
+		}
+
+		current := "<unknown>"
+		var currentPercent *int32
+		for _, st := range status.CurrentMetrics {
+			if st.Resource != nil && st.Resource.Name == metric.Resource.Name {
+				if st.Resource.Current.AverageUtilization != nil {
+					current = fmt.Sprintf("%d%%", *st.Resource.Current.AverageUtilization)
+					currentPercent = st.Resource.Current.AverageUtilization
+				} else if st.Resource.Current.AverageValue != nil {
+					current = st.Resource.Current.AverageValue.String()
+				}
+			}
+		}
+		targets = append(targets, fmt.Sprintf("%s: %s/%s", metric.Resource.Name, current, target))
+		metrics = append(metrics, HPAMetric{
+			Type:           "Resource",
+			Name:           string(metric.Resource.Name),
+			CurrentValue:   current,
+			TargetValue:    target,
+			CurrentPercent: currentPercent,
+			TargetPercent:  targetPercent,
+		})
+	}
+	targetsStr := "<none>"
+	if len(targets) > 0 {
+		targetsStr = strings.Join(targets, ", ")
+	}
+	return targetsStr, metrics
 }
 
 func NewHPAHandler(k8s *service.K8sManager) *HPAHandler {
@@ -78,42 +130,7 @@ func (h *HPAHandler) List(ctx *gofr.Context) (interface{}, error) {
 		// Get reference
 		reference := fmt.Sprintf("%s/%s", hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
 
-		// Get targets
-		var targets []string
-		for _, metric := range hpa.Spec.Metrics {
-			if metric.Resource != nil {
-				target := ""
-				if metric.Resource.Target.AverageUtilization != nil {
-					target = fmt.Sprintf("%d%%", *metric.Resource.Target.AverageUtilization)
-				} else if metric.Resource.Target.AverageValue != nil {
-					target = metric.Resource.Target.AverageValue.String()
-				}
-
-				// Find current value
-				current := "<unknown>"
-				for _, status := range hpa.Status.CurrentMetrics {
-					if status.Resource != nil && status.Resource.Name == metric.Resource.Name {
-						if status.Resource.Current.AverageUtilization != nil {
-							current = fmt.Sprintf("%d%%", *status.Resource.Current.AverageUtilization)
-						} else if status.Resource.Current.AverageValue != nil {
-							current = status.Resource.Current.AverageValue.String()
-						}
-					}
-				}
-				targets = append(targets, fmt.Sprintf("%s: %s/%s", metric.Resource.Name, current, target))
-			}
-		}
-
-		targetsStr := "<none>"
-		if len(targets) > 0 {
-			targetsStr = ""
-			for i, t := range targets {
-				if i > 0 {
-					targetsStr += ", "
-				}
-				targetsStr += t
-			}
-		}
+		targetsStr, metrics := buildHPAMetrics(hpa.Spec, hpa.Status)
 
 		minPods := int32(1)
 		if hpa.Spec.MinReplicas != nil {
@@ -129,6 +146,7 @@ func (h *HPAHandler) List(ctx *gofr.Context) (interface{}, error) {
 			MaxPods:   hpa.Spec.MaxReplicas,
 			Replicas:  hpa.Status.CurrentReplicas,
 			Age:       formatAge(hpa.CreationTimestamp.Time),
+			Metrics:   metrics,
 		})
 	}
 
@@ -153,56 +171,7 @@ func (h *HPAHandler) Get(ctx *gofr.Context) (interface{}, error) {
 	// Get reference
 	reference := fmt.Sprintf("%s/%s", hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
 
-	// Get targets summary
-	var targets []string
-	var metrics []HPAMetric
-	for _, metric := range hpa.Spec.Metrics {
-		if metric.Resource != nil {
-			target := ""
-			var targetPercent *int32
-			if metric.Resource.Target.AverageUtilization != nil {
-				target = fmt.Sprintf("%d%%", *metric.Resource.Target.AverageUtilization)
-				targetPercent = metric.Resource.Target.AverageUtilization
-			} else if metric.Resource.Target.AverageValue != nil {
-				target = metric.Resource.Target.AverageValue.String()
-			}
-
-			// Find current value
-			current := "<unknown>"
-			var currentPercent *int32
-			for _, status := range hpa.Status.CurrentMetrics {
-				if status.Resource != nil && status.Resource.Name == metric.Resource.Name {
-					if status.Resource.Current.AverageUtilization != nil {
-						current = fmt.Sprintf("%d%%", *status.Resource.Current.AverageUtilization)
-						currentPercent = status.Resource.Current.AverageUtilization
-					} else if status.Resource.Current.AverageValue != nil {
-						current = status.Resource.Current.AverageValue.String()
-					}
-				}
-			}
-			targets = append(targets, fmt.Sprintf("%s: %s/%s", metric.Resource.Name, current, target))
-
-			metrics = append(metrics, HPAMetric{
-				Type:           "Resource",
-				Name:           string(metric.Resource.Name),
-				CurrentValue:   current,
-				TargetValue:    target,
-				CurrentPercent: currentPercent,
-				TargetPercent:  targetPercent,
-			})
-		}
-	}
-
-	targetsStr := "<none>"
-	if len(targets) > 0 {
-		targetsStr = ""
-		for i, t := range targets {
-			if i > 0 {
-				targetsStr += ", "
-			}
-			targetsStr += t
-		}
-	}
+	targetsStr, metrics := buildHPAMetrics(hpa.Spec, hpa.Status)
 
 	minPods := int32(1)
 	if hpa.Spec.MinReplicas != nil {
@@ -266,6 +235,51 @@ func (h *HPAHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		ScaleUpBehavior:   scaleUpBehavior,
 		ScaleDownBehavior: scaleDownBehavior,
 	}, nil
+}
+
+type updateHPARequest struct {
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+}
+
+// Update edits the HPA spec.minReplicas and/or spec.maxReplicas fields.
+// Target-utilization edits require touching metrics[] which varies by metric
+// type — intentionally out of scope for the quick-edit; use YAML for that.
+func (h *HPAHandler) Update(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req updateHPARequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.MinReplicas == nil && req.MaxReplicas == nil {
+		return nil, fmt.Errorf("minReplicas or maxReplicas must be provided")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	spec := map[string]interface{}{}
+	if req.MinReplicas != nil {
+		spec["minReplicas"] = *req.MinReplicas
+	}
+	if req.MaxReplicas != nil {
+		spec["maxReplicas"] = *req.MaxReplicas
+	}
+	body, err := json.Marshal(map[string]interface{}{"spec": spec})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.AutoscalingV2().HorizontalPodAutoscalers(namespace).Patch(
+		context.Background(), name, types.MergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("HPA %s updated", name)}, nil
 }
 
 // Events returns events for a specific HPA

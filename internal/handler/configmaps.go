@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -141,6 +143,75 @@ func (h *ConfigMapHandler) Events(ctx *gofr.Context) (interface{}, error) {
 	}
 
 	return result, nil
+}
+
+type upsertCMKeyRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// UpsertKey adds or updates a data key in a ConfigMap via strategic-merge-patch.
+func (h *ConfigMapHandler) UpsertKey(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req upsertCMKeyRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.Key == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	patch := map[string]interface{}{
+		"data": map[string]string{req.Key: req.Value},
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.CoreV1().ConfigMaps(namespace).Patch(
+		context.Background(), name, types.StrategicMergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("Key %q saved", req.Key)}, nil
+}
+
+// DeleteKey removes a data key from a ConfigMap via json-merge-patch.
+func (h *ConfigMapHandler) DeleteKey(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+	key := ctx.PathParam("key")
+	if key == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	patch := map[string]interface{}{
+		"data": map[string]interface{}{key: nil},
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.CoreV1().ConfigMaps(namespace).Patch(
+		context.Background(), name, types.MergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("Key %q removed", key)}, nil
 }
 
 func (h *ConfigMapHandler) Delete(ctx *gofr.Context) (interface{}, error) {

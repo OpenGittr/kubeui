@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQuery, useMutation } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
 import { ToastProvider } from './components/Toast';
+import { ThemeProvider } from './components/ThemeProvider';
 import { Overview } from './pages/Overview';
 import { Pods } from './pages/Pods';
 import { Deployments } from './pages/Deployments';
@@ -39,9 +40,11 @@ const queryClient = new QueryClient({
 
 export type ClusterStatus = 'connected' | 'failed' | 'untested';
 
+const namespaceStorageKey = (cluster: string) => `kubeui.namespace.${cluster}`;
+
 function AppContent() {
   useDocumentTitle();
-  const [namespace, setNamespace] = useState<string>('');
+  const [namespace, setNamespaceState] = useState<string>('');
   const [clusterStatuses, setClusterStatuses] = useState<Record<string, ClusterStatus>>({});
 
   const { data: clusters } = useQuery({
@@ -53,6 +56,36 @@ function AppContent() {
     queryKey: ['current-cluster'],
     queryFn: api.clusters.current,
   });
+
+  // Restore per-cluster namespace from localStorage whenever the active cluster changes.
+  useEffect(() => {
+    if (!currentCluster?.context) return;
+    const saved = localStorage.getItem(namespaceStorageKey(currentCluster.context));
+    setNamespaceState(saved ?? '');
+  }, [currentCluster?.context]);
+
+  const setNamespace = (ns: string) => {
+    setNamespaceState(ns);
+    if (currentCluster?.context) {
+      localStorage.setItem(namespaceStorageKey(currentCluster.context), ns);
+    }
+  };
+
+  // When a deep link arrives carrying ?selected=<ns>/<name>, auto-switch the
+  // app namespace to that ns so the receiving page's list query actually
+  // includes the item (otherwise the detail panel won't open).
+  const [searchParams] = useSearchParams();
+  const linkedSelected = searchParams.get('selected');
+  useEffect(() => {
+    if (!linkedSelected) return;
+    const slash = linkedSelected.indexOf('/');
+    if (slash <= 0) return; // cluster-scoped or malformed
+    const linkedNs = linkedSelected.slice(0, slash);
+    if (linkedNs && linkedNs !== namespace) {
+      setNamespace(linkedNs);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedSelected]);
 
   // Include current cluster context in query key so it caches per cluster
   const {
@@ -80,7 +113,8 @@ function AppContent() {
   const switchClusterMutation = useMutation({
     mutationFn: api.clusters.switch,
     onSuccess: async () => {
-      setNamespace(''); // Reset namespace selection
+      // Namespace is restored from localStorage by the effect above when the
+      // current-cluster query returns the new context.
       await refetchCurrentCluster();
       // Invalidate resource queries (but not namespaces - they're cached per cluster)
       queryClient.invalidateQueries({ queryKey: ['pods'] });
@@ -164,13 +198,15 @@ function AppContent() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </ToastProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 

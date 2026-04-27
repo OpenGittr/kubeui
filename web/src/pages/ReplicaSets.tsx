@@ -9,6 +9,23 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const RS_SORTERS = {
+  name: (r: ReplicaSetInfo) => r.name,
+  namespace: (r: ReplicaSetInfo) => r.namespace,
+  desired: (r: ReplicaSetInfo) => r.desired,
+  current: (r: ReplicaSetInfo) => r.current,
+  ready: (r: ReplicaSetInfo) => r.ready,
+  age: (r: ReplicaSetInfo) => -ageSeconds(r.age),
+};
+
+const RS_CHECKS = [
+  { verb: 'delete', group: 'apps', resource: 'replicasets' },
+];
 
 interface ReplicaSetsProps {
   namespace?: string;
@@ -120,6 +137,7 @@ function ReplicaSetDetailsPanel({
                   state={container.state}
                   restarts={container.restarts}
                   podName={container.podName}
+                  podNamespace={replicaset.namespace}
                   resources={{
                     cpu: container.cpu,
                     memory: container.memory,
@@ -229,6 +247,9 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
   const [deleteTarget, setDeleteTarget] = useState<ReplicaSetInfo | null>(null);
   const [selectedReplicaSet, setSelectedReplicaSet] = useState<ReplicaSetInfo | null>(null);
   const [showEmpty, setShowEmpty] = useState(false);
+  const { can } = usePermissions(namespace, RS_CHECKS);
+  const canDelete = can('delete', 'apps', 'replicasets');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on replicasets';
 
   const { data: replicasets, isLoading, error } = useQuery({
     queryKey: ['replicasets', namespace],
@@ -236,6 +257,7 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(replicasets, selectedReplicaSet, setSelectedReplicaSet);
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.workloads.deleteReplicaSet(ns, name),
@@ -263,6 +285,7 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
   // Filter out ReplicaSets with desired=0 unless showEmpty is true
   const filteredReplicasets = replicasets?.filter(rs => showEmpty || rs.desired > 0);
   const hiddenCount = (replicasets?.length || 0) - (filteredReplicasets?.length || 0);
+  const sort = useTableSort(filteredReplicasets, RS_SORTERS);
 
   return (
     <div>
@@ -291,17 +314,17 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Desired</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Current</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ready</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="desired" label="Desired" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="current" label="Current" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filteredReplicasets?.map((rs) => (
+            {sort.sorted.map((rs) => (
               <tr
                 key={`${rs.namespace}/${rs.name}`}
                 className={`hover:bg-gray-50 cursor-pointer ${selectedReplicaSet?.name === rs.name && selectedReplicaSet?.namespace === rs.namespace ? 'bg-blue-50' : ''}`}
@@ -337,6 +360,8 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
                         label: 'Delete',
                         icon: <Trash2 className="w-4 h-4" />,
                         variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
                         onClick: () => setDeleteTarget(rs),
                       },
                     ]}

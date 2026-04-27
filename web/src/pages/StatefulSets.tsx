@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { StatefulSetInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
@@ -9,6 +9,24 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { SetImageModal } from '../components/SetImageModal';
+import { usePermissions } from '../hooks/usePermissions';
+import { useSelectedResource } from '../hooks/useSelectedResource';
+import { useTableSort, ageSeconds } from '../hooks/useTableSort';
+import { SortableTh } from '../components/SortableTh';
+
+const STS_SORTERS = {
+  name: (s: StatefulSetInfo) => s.name,
+  namespace: (s: StatefulSetInfo) => s.namespace,
+  ready: (s: StatefulSetInfo) => s.readyReplicas ?? 0,
+  replicas: (s: StatefulSetInfo) => s.replicas,
+  age: (s: StatefulSetInfo) => -ageSeconds(s.age),
+};
+
+const STS_CHECKS = [
+  { verb: 'patch', group: 'apps', resource: 'statefulsets' },
+  { verb: 'delete', group: 'apps', resource: 'statefulsets' },
+];
 
 interface StatefulSetsProps {
   namespace?: string;
@@ -112,6 +130,7 @@ function StatefulSetDetailsPanel({
                   state={container.state}
                   restarts={container.restarts}
                   podName={container.podName}
+                  podNamespace={statefulset.namespace}
                   resources={{
                     cpu: container.cpu,
                     memory: container.memory,
@@ -220,6 +239,12 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
   const [yamlStatefulSet, setYamlStatefulSet] = useState<StatefulSetInfo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StatefulSetInfo | null>(null);
   const [selectedStatefulSet, setSelectedStatefulSet] = useState<StatefulSetInfo | null>(null);
+  const [imageTarget, setImageTarget] = useState<StatefulSetInfo | null>(null);
+  const { can } = usePermissions(namespace, STS_CHECKS);
+  const canPatch = can('patch', 'apps', 'statefulsets');
+  const canDelete = can('delete', 'apps', 'statefulsets');
+  const patchTitle = canPatch ? undefined : 'Requires patch on statefulsets';
+  const deleteTitle = canDelete ? undefined : 'Requires delete on statefulsets';
 
   const { data: statefulsets, isLoading, error } = useQuery({
     queryKey: ['statefulsets', namespace],
@@ -227,6 +252,8 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
     refetchInterval: isConnected ? 5000 : false,
     enabled: isConnected,
   });
+  useSelectedResource(statefulsets, selectedStatefulSet, setSelectedStatefulSet);
+  const sort = useTableSort(statefulsets, STS_SORTERS);
 
   const deleteMutation = useMutation({
     mutationFn: ({ ns, name }: { ns: string; name: string }) => api.workloads.deleteStatefulSet(ns, name),
@@ -268,16 +295,16 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
         <table className="w-full">
           <thead className="bg-gray-50 border-b">
             <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Namespace</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Ready</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Replicas</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Age</th>
+              <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="replicas" label="Replicas" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {statefulsets?.map((ss) => {
+            {sort.sorted.map((ss) => {
               const [ready, total] = ss.ready.split('/').map(Number);
               return (
                 <tr
@@ -306,6 +333,13 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
                           onClick: () => setSelectedStatefulSet(ss),
                         },
                         {
+                          label: 'Set image',
+                          icon: <Box className="w-4 h-4" />,
+                          disabled: !canPatch,
+                          title: patchTitle,
+                          onClick: () => setImageTarget(ss),
+                        },
+                        {
                           label: 'View YAML',
                           icon: <FileCode className="w-4 h-4" />,
                           onClick: () => setYamlStatefulSet(ss),
@@ -314,6 +348,8 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
                           label: 'Delete',
                           icon: <Trash2 className="w-4 h-4" />,
                           variant: 'danger',
+                          disabled: !canDelete,
+                          title: deleteTitle,
                           onClick: () => setDeleteTarget(ss),
                         },
                       ]}
@@ -336,6 +372,21 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
           namespace={yamlStatefulSet.namespace}
           name={yamlStatefulSet.name}
           onClose={() => setYamlStatefulSet(null)}
+        />
+      )}
+      {imageTarget && (
+        <SetImageModal
+          kind="statefulset"
+          namespace={imageTarget.namespace}
+          name={imageTarget.name}
+          onClose={() => setImageTarget(null)}
+          onSaved={() => setImageTarget(null)}
+          fetchContainers={async () => {
+            const d = await api.workloads.getStatefulSet(imageTarget.namespace, imageTarget.name);
+            return (d.containerDetails || []).map(c => ({ name: c.name, image: c.image }));
+          }}
+          setImage={api.workloads.setStatefulSetImage}
+          invalidateKeys={[['statefulsets'], ['statefulset-details', imageTarget.namespace, imageTarget.name]]}
         />
       )}
 

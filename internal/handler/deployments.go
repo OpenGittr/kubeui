@@ -256,6 +256,34 @@ func (h *DeploymentHandler) Scale(ctx *gofr.Context) (interface{}, error) {
 	}, nil
 }
 
+func (h *DeploymentHandler) SetImage(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	var req setImageRequest
+	if err := ctx.Bind(&req); err != nil {
+		return nil, err
+	}
+	if req.Container == "" || req.Image == "" {
+		return nil, fmt.Errorf("container and image are required")
+	}
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildImagePatch(req.Container, req.Image)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.AppsV1().Deployments(namespace).Patch(
+		context.Background(), name, types.StrategicMergePatchType, body, metav1.PatchOptions{},
+	); err != nil {
+		return nil, err
+	}
+	return map[string]string{"message": fmt.Sprintf("Deployment %s: container %s image set to %s", name, req.Container, req.Image)}, nil
+}
+
 // Restart triggers a rolling restart of a deployment
 func (h *DeploymentHandler) Restart(ctx *gofr.Context) (interface{}, error) {
 	namespace := ctx.PathParam("namespace")
