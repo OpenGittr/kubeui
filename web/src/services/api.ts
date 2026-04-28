@@ -83,6 +83,12 @@ export interface EnvVar {
   valueFrom?: string; // "configmap:name/key", "secret:name/key", "field:path"
 }
 
+export interface WorkloadHPA {
+  name: string;
+  minReplicas: number;
+  maxReplicas: number;
+}
+
 export interface DeploymentInfo {
   name: string;
   namespace: string;
@@ -90,9 +96,13 @@ export interface DeploymentInfo {
   upToDate: number;
   available: number;
   age: string;
+  /** Age string of the most recent rollout (Progressing condition's
+   *  lastUpdateTime); empty when no condition reported it. */
+  lastRollout?: string;
   replicas: number;
   labels?: Record<string, string>;
   containers?: string[];
+  hpa?: WorkloadHPA;
   // Detailed fields
   strategy?: string;
   selector?: Record<string, string>;
@@ -413,6 +423,7 @@ export interface DaemonSetInfo {
   available: number;
   nodeSelector: string;
   age: string;
+  lastRollout?: string;
   labels?: Record<string, string>;
   selector?: Record<string, string>;
   containerDetails?: DaemonSetContainer[];
@@ -462,9 +473,11 @@ export interface StatefulSetInfo {
   currentReplicas?: number;
   updatedReplicas?: number;
   age: string;
+  lastRollout?: string;
   serviceName?: string;
   labels?: Record<string, string>;
   selector?: Record<string, string>;
+  hpa?: WorkloadHPA;
   containerDetails?: StatefulSetContainer[];
   conditions?: StatefulSetCondition[];
   runningContainers?: StatefulSetRunningContainer[];
@@ -998,6 +1011,11 @@ export const api = {
     },
   },
 
+  health: {
+    get: (namespace?: string) =>
+      request<HealthResponse>(`/health${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`),
+  },
+
   permissions: {
     get: (namespace: string) =>
       request<PermissionsResponse>(`/permissions?namespace=${encodeURIComponent(namespace)}`),
@@ -1054,6 +1072,43 @@ export interface PermCheck {
 export interface PermCheckResult extends PermCheck {
   allowed: boolean;
   reason?: string;
+}
+
+export interface HealthPodIssue {
+  namespace: string;
+  name: string;
+  container?: string;
+  reason: string;
+  message?: string;
+  restarts?: number;
+  age?: string;
+}
+
+export interface HealthWorkloadIssue {
+  kind: string;
+  namespace: string;
+  name: string;
+  ready: number;
+  desired: number;
+  age?: string;
+}
+
+export interface HealthEvent {
+  namespace: string;
+  reason: string;
+  message: string;
+  object: string;
+  count: number;
+  age: string;
+}
+
+export interface HealthResponse {
+  namespace: string;
+  crashLooping: HealthPodIssue[];
+  oomKilled: HealthPodIssue[];
+  pending: HealthPodIssue[];
+  unhealthyWorkloads: HealthWorkloadIssue[];
+  recentWarnings: HealthEvent[];
 }
 
 export interface VersionInfo {

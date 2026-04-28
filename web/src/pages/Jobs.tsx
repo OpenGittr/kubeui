@@ -1,13 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { JobInfo, CronJobInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Pause, Play, Clock, Save } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Pause, Play, Clock, Save, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
+import { TailLogsModal } from '../components/MultiPodLogModal';
+import type { PodTarget } from '../components/MultiPodLogModal';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource } from '../hooks/useSelectedResource';
@@ -117,10 +120,12 @@ function JobDetailsPanel({
   job,
   onClose,
   onViewYaml,
+  actions,
 }: {
   job: JobInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: jobDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['job-details', job.namespace, job.name],
@@ -149,6 +154,7 @@ function JobDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -323,10 +329,12 @@ function CronJobDetailsPanel({
   cronjob,
   onClose,
   onViewYaml,
+  actions,
 }: {
   cronjob: CronJobInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: cronjobDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['cronjob-details', cronjob.namespace, cronjob.name],
@@ -360,6 +368,7 @@ function CronJobDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -506,6 +515,7 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
   const [yamlJob, setYamlJob] = useState<JobInfo | null>(null);
   const [yamlCronJob, setYamlCronJob] = useState<CronJobInfo | null>(null);
   const [editSchedule, setEditSchedule] = useState<CronJobInfo | null>(null);
+  const [tailJobTarget, setTailJobTarget] = useState<JobInfo | null>(null);
   const { can } = usePermissions(namespace, JOB_CHECKS);
   const canPatchCJ = can('patch', 'batch', 'cronjobs');
   const canDeleteCJ = can('delete', 'batch', 'cronjobs');
@@ -576,6 +586,47 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
   if (!isConnected) {
     return <div className="text-gray-500">Not connected to cluster</div>;
   }
+
+  const jobActionsFor = (j: JobInfo): ActionMenuItem[] => [
+    {
+      label: 'Tail logs',
+      icon: <ScrollText className="w-4 h-4" />,
+      onClick: () => setTailJobTarget(j),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDeleteJob,
+      title: deleteJobTitle,
+      onClick: () => setDeleteJobTarget(j),
+    },
+  ];
+
+  const cronJobActionsFor = (cj: CronJobInfo): ActionMenuItem[] => [
+    {
+      label: cj.suspend ? 'Resume' : 'Suspend',
+      icon: cj.suspend ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />,
+      disabled: !canPatchCJ,
+      title: patchCJTitle,
+      onClick: () => suspendCronJobMutation.mutate({ cj, suspend: !cj.suspend }),
+    },
+    {
+      label: 'Edit schedule',
+      icon: <Clock className="w-4 h-4" />,
+      disabled: !canPatchCJ,
+      title: patchCJTitle,
+      onClick: () => setEditSchedule(cj),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDeleteCJ,
+      title: deleteCJTitle,
+      onClick: () => setDeleteCronJobTarget(cj),
+    },
+  ];
 
   return (
     <div>
@@ -648,6 +699,11 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
                               label: 'Details',
                               icon: <Info className="w-4 h-4" />,
                               onClick: () => setSelectedJob(job),
+                            },
+                            {
+                              label: 'Tail logs',
+                              icon: <ScrollText className="w-4 h-4" />,
+                              onClick: () => setTailJobTarget(job),
                             },
                             {
                               label: 'View YAML',
@@ -778,6 +834,24 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
         />
       )}
 
+      {tailJobTarget && (
+        <TailLogsModal
+          title={`Logs · ${tailJobTarget.namespace}/${tailJobTarget.name}`}
+          queryKey={['tail-pods', 'job', tailJobTarget.namespace, tailJobTarget.name]}
+          fetchPods={async () => {
+            const d = await api.jobs.get(tailJobTarget.namespace, tailJobTarget.name);
+            const seen = new Set<string>();
+            const pods: PodTarget[] = [];
+            for (const c of d.runningContainers || []) {
+              if (seen.has(c.podName)) continue;
+              seen.add(c.podName);
+              pods.push({ namespace: tailJobTarget.namespace, name: c.podName });
+            }
+            return pods;
+          }}
+          onClose={() => setTailJobTarget(null)}
+        />
+      )}
       {yamlCronJob && (
         <YamlModal
           resourceType="cronjobs"
@@ -834,6 +908,7 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
           onViewYaml={() => {
             setYamlJob(selectedJob);
           }}
+          actions={jobActionsFor(selectedJob)}
         />
       )}
 
@@ -844,6 +919,7 @@ export function Jobs({ namespace, isConnected = true }: JobsProps) {
           onViewYaml={() => {
             setYamlCronJob(selectedCronJob);
           }}
+          actions={cronJobActionsFor(selectedCronJob)}
         />
       )}
     </div>

@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Lock, LockOpen, Pen
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetadataTabs } from '../components/MetadataTabs';
@@ -287,10 +288,12 @@ function SecretDetailsPanel({
   secret,
   onClose,
   onViewYaml,
+  actions,
 }: {
   secret: SecretInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
   const { data: secretDetails, isLoading: detailsLoading } = useQuery({
@@ -326,6 +329,7 @@ function SecretDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -458,6 +462,17 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  const actionsFor = (secret: SecretInfo): ActionMenuItem[] => [
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(secret),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -573,6 +588,7 @@ export function Secrets({ namespace, isConnected = true }: SecretsProps) {
           onViewYaml={() => {
             setYamlSecret(selectedSecret);
           }}
+          actions={actionsFor(selectedSecret)}
         />
       )}
     </div>

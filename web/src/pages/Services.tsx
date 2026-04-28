@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Cable, Save, Plus }
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetadataTabs } from '../components/MetadataTabs';
@@ -210,10 +211,12 @@ function ServiceDetailsPanel({
   service,
   onClose,
   onViewYaml,
+  actions,
 }: {
   service: ServiceInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: serviceDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['service-details', service.namespace, service.name],
@@ -242,6 +245,7 @@ function ServiceDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -415,6 +419,24 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  const actionsFor = (svc: ServiceInfo): ActionMenuItem[] => [
+    {
+      label: 'Edit ports',
+      icon: <Cable className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setEditPortsTarget(svc),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(svc),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -469,26 +491,13 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
                         icon: <Info className="w-4 h-4" />,
                         onClick: () => setSelectedService(svc),
                       },
-                      {
-                        label: 'Edit ports',
-                        icon: <Cable className="w-4 h-4" />,
-                        disabled: !canPatch,
-                        title: patchTitle,
-                        onClick: () => setEditPortsTarget(svc),
-                      },
+                      ...actionsFor(svc).filter(a => a.label !== 'Delete'),
                       {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlService(svc),
                       },
-                      {
-                        label: 'Delete',
-                        icon: <Trash2 className="w-4 h-4" />,
-                        variant: 'danger',
-                        disabled: !canDelete,
-                        title: deleteTitle,
-                        onClick: () => setDeleteTarget(svc),
-                      },
+                      ...actionsFor(svc).filter(a => a.label === 'Delete'),
                     ]}
                   />
                 </td>
@@ -540,6 +549,7 @@ export function Services({ namespace, isConnected = true }: ServicesProps) {
           onViewYaml={() => {
             setYamlService(selectedService);
           }}
+          actions={actionsFor(selectedService)}
         />
       )}
     </div>

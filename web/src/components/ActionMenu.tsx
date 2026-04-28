@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { MoreVertical } from 'lucide-react';
 
-interface ActionMenuItem {
+export interface ActionMenuItem {
   label: string;
   icon?: React.ReactNode;
   onClick: () => void;

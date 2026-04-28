@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info } from 'lucide-react
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
@@ -45,10 +46,12 @@ function ReplicaSetDetailsPanel({
   replicaset,
   onClose,
   onViewYaml,
+  actions,
 }: {
   replicaset: ReplicaSetInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: replicasetDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['replicaset-details', replicaset.namespace, replicaset.name],
@@ -77,6 +80,7 @@ function ReplicaSetDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -270,6 +274,23 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
     },
   });
 
+  // Filter out ReplicaSets with desired=0 unless showEmpty is true.
+  // Hook must be called before any early return (rules of hooks).
+  const filteredReplicasets = replicasets?.filter(rs => showEmpty || rs.desired > 0);
+  const hiddenCount = (replicasets?.length || 0) - (filteredReplicasets?.length || 0);
+  const sort = useTableSort(filteredReplicasets, RS_SORTERS);
+
+  const actionsFor = (rs: ReplicaSetInfo): ActionMenuItem[] => [
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(rs),
+    },
+  ];
+
   if (!isConnected) {
     return <div className="text-gray-500">Not connected to cluster</div>;
   }
@@ -281,11 +302,6 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
   if (error) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
-
-  // Filter out ReplicaSets with desired=0 unless showEmpty is true
-  const filteredReplicasets = replicasets?.filter(rs => showEmpty || rs.desired > 0);
-  const hiddenCount = (replicasets?.length || 0) - (filteredReplicasets?.length || 0);
-  const sort = useTableSort(filteredReplicasets, RS_SORTERS);
 
   return (
     <div>
@@ -356,14 +372,7 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlReplicaSet(rs),
                       },
-                      {
-                        label: 'Delete',
-                        icon: <Trash2 className="w-4 h-4" />,
-                        variant: 'danger',
-                        disabled: !canDelete,
-                        title: deleteTitle,
-                        onClick: () => setDeleteTarget(rs),
-                      },
+                      ...actionsFor(rs),
                     ]}
                   />
                 </td>
@@ -413,6 +422,7 @@ export function ReplicaSets({ namespace, isConnected = true }: ReplicaSetsProps)
           onViewYaml={() => {
             setYamlReplicaSet(selectedReplicaSet);
           }}
+          actions={actionsFor(selectedReplicaSet)}
         />
       )}
     </div>

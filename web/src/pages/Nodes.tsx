@@ -6,6 +6,7 @@ import { RefreshCw, X, FileCode, ChevronRight, Info, Ban, Play } from 'lucide-re
 import { YamlModal } from '../components/YamlModal';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource } from '../hooks/useSelectedResource';
@@ -156,10 +157,11 @@ function RoleBadge({ roles }: { roles: string }) {
   );
 }
 
-function NodeDetailsPanel({ node, onClose, onViewYaml }: {
+function NodeDetailsPanel({ node, onClose, onViewYaml, actions }: {
   node: NodeInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   return (
     <div className="fixed inset-y-0 right-0 w-1/2 bg-white shadow-xl z-40 flex flex-col">
@@ -176,6 +178,7 @@ function NodeDetailsPanel({ node, onClose, onViewYaml }: {
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -313,6 +316,16 @@ export function Nodes({ isConnected = true }: NodesProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  const actionsFor = (node: NodeInfo): ActionMenuItem[] => [
+    {
+      label: node.unschedulable ? 'Uncordon' : 'Cordon',
+      icon: node.unschedulable ? <Play className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
+      disabled: !canPatchNodes || cordonMutation.isPending,
+      title: cordonTitle,
+      onClick: () => cordonMutation.mutate({ name: node.name, unschedulable: !node.unschedulable }),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -384,13 +397,7 @@ export function Nodes({ isConnected = true }: NodesProps) {
                         icon: <Info className="w-4 h-4" />,
                         onClick: () => setSelectedNode(node),
                       },
-                      {
-                        label: node.unschedulable ? 'Uncordon' : 'Cordon',
-                        icon: node.unschedulable ? <Play className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
-                        disabled: !canPatchNodes || cordonMutation.isPending,
-                        title: cordonTitle,
-                        onClick: () => cordonMutation.mutate({ name: node.name, unschedulable: !node.unschedulable }),
-                      },
+                      ...actionsFor(node),
                       {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
@@ -420,6 +427,7 @@ export function Nodes({ isConnected = true }: NodesProps) {
           node={selectedNode}
           onClose={() => setSelectedNode(null)}
           onViewYaml={() => setYamlNode(selectedNode)}
+          actions={actionsFor(selectedNode)}
         />
       )}
 

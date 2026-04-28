@@ -73,6 +73,10 @@ func main() {
 	// Add exec middleware for WebSocket terminal
 	app.UseMiddleware(execHandler.Middleware)
 
+	// Initialize log streaming handler (multi-pod tailing) and middleware
+	logStreamHandler := handler.NewLogStreamHandler(k8sManager)
+	app.UseMiddleware(logStreamHandler.Middleware)
+
 	// Add SSE middleware for streaming
 	app.UseMiddleware(sseHandler.SSEMiddleware)
 
@@ -101,6 +105,7 @@ func main() {
 	searchHandler := handler.NewSearchHandler(k8sManager)
 	portForwardHandler := handler.NewPortForwardHandler(k8sManager)
 	permissionHandler := handler.NewPermissionHandler(k8sManager)
+	healthHandler := handler.NewHealthHandler(k8sManager)
 
 	// Cluster routes
 	app.GET("/api/clusters", clusterHandler.List)
@@ -233,6 +238,9 @@ func main() {
 	// Permissions routes
 	app.GET("/api/permissions", permissionHandler.Get)
 	app.POST("/api/permissions/check", permissionHandler.Check)
+
+	// Health dashboard
+	app.GET("/api/health", healthHandler.Get)
 
 	// Search route
 	app.GET("/api/search", searchHandler.Search)

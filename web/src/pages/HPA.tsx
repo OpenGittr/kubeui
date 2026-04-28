@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, X, ChevronRight, Info, TrendingUp, TrendingDown, A
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { useToast } from '../components/Toast';
 import { usePermissions } from '../hooks/usePermissions';
@@ -206,7 +207,7 @@ function ReplicasBar({ min, max, current, desired }: {
  *
  *   3 / 1–10  ┃────●──────┃
  */
-function MiniReplicasBar({ min, max, current }: { min: number; max: number; current: number }) {
+export function MiniReplicasBar({ min, max, current }: { min: number; max: number; current: number }) {
   if (min === max) {
     return (
       <span className="inline-flex items-center gap-1.5 font-mono text-sm whitespace-nowrap">
@@ -313,10 +314,12 @@ function HPADetailsPanel({
   hpa,
   onClose,
   onViewYaml,
+  actions,
 }: {
   hpa: HPAInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: hpaDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['hpa-details', hpa.namespace, hpa.name],
@@ -348,6 +351,7 @@ function HPADetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -600,6 +604,16 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  const actionsFor = (h: HPAInfo): ActionMenuItem[] => [
+    {
+      label: 'Edit min/max',
+      icon: <Scale className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setEditHPA(h),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -707,6 +721,7 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
           onViewYaml={() => {
             setYamlHPA(selectedHPA);
           }}
+          actions={actionsFor(selectedHPA)}
         />
       )}
     </div>

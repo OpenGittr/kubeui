@@ -10,12 +10,42 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
 
 type HPAHandler struct {
 	k8s *service.K8sManager
+}
+
+// hpaTargetMap returns a map keyed by `<namespace>/<kind>/<name>` ->
+// WorkloadHPA for every HPA in the given namespace (or cluster-wide when
+// namespace is ""). Used by workload list handlers (Deployments,
+// StatefulSets) to attach scaling bounds without an N+1 fetch.
+//
+// Returns nil on error so callers can fall through to "no HPA info" rather
+// than failing the whole list response.
+func hpaTargetMap(ctx context.Context, client kubernetes.Interface, namespace string) map[string]*WorkloadHPA {
+	list, err := client.AutoscalingV2().HorizontalPodAutoscalers(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]*WorkloadHPA, len(list.Items))
+	for _, hpa := range list.Items {
+		ref := hpa.Spec.ScaleTargetRef
+		min := int32(1)
+		if hpa.Spec.MinReplicas != nil {
+			min = *hpa.Spec.MinReplicas
+		}
+		key := hpa.Namespace + "/" + ref.Kind + "/" + ref.Name
+		out[key] = &WorkloadHPA{
+			Name:        hpa.Name,
+			MinReplicas: min,
+			MaxReplicas: hpa.Spec.MaxReplicas,
+		}
+	}
+	return out
 }
 
 // buildHPAMetrics extracts the (targetsString, structuredMetrics) pair from an

@@ -1,15 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DaemonSetInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { SetImageModal } from '../components/SetImageModal';
+import { TailLogsModal } from '../components/MultiPodLogModal';
+import type { PodTarget } from '../components/MultiPodLogModal';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource } from '../hooks/useSelectedResource';
 import { useTableSort, ageSeconds } from '../hooks/useTableSort';
@@ -22,6 +25,7 @@ const DS_SORTERS = {
   current: (d: DaemonSetInfo) => d.current,
   ready: (d: DaemonSetInfo) => d.ready,
   upToDate: (d: DaemonSetInfo) => d.upToDate,
+  lastRollout: (d: DaemonSetInfo) => -ageSeconds(d.lastRollout || d.age),
   age: (d: DaemonSetInfo) => -ageSeconds(d.age),
 };
 
@@ -48,10 +52,12 @@ function DaemonSetDetailsPanel({
   daemonset,
   onClose,
   onViewYaml,
+  actions,
 }: {
   daemonset: DaemonSetInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: daemonsetDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['daemonset-details', daemonset.namespace, daemonset.name],
@@ -90,6 +96,7 @@ function DaemonSetDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -265,6 +272,7 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
   const [deleteTarget, setDeleteTarget] = useState<DaemonSetInfo | null>(null);
   const [selectedDaemonSet, setSelectedDaemonSet] = useState<DaemonSetInfo | null>(null);
   const [imageTarget, setImageTarget] = useState<DaemonSetInfo | null>(null);
+  const [tailTarget, setTailTarget] = useState<DaemonSetInfo | null>(null);
   const { can } = usePermissions(namespace, DS_CHECKS);
   const canPatch = can('patch', 'apps', 'daemonsets');
   const canDelete = can('delete', 'apps', 'daemonsets');
@@ -292,6 +300,13 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
     },
   });
 
+  // Filter out DaemonSets with desired=0 unless showEmpty is true. Computed
+  // unconditionally because useTableSort must be called before any early
+  // return (rules of hooks).
+  const filteredDaemonsets = daemonsets?.filter(ds => showEmpty || ds.desired > 0);
+  const hiddenCount = (daemonsets?.length || 0) - (filteredDaemonsets?.length || 0);
+  const sort = useTableSort(filteredDaemonsets, DS_SORTERS);
+
   if (!isConnected) {
     return <div className="text-gray-500">Not connected to cluster</div>;
   }
@@ -304,10 +319,28 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
-  // Filter out DaemonSets with desired=0 unless showEmpty is true
-  const filteredDaemonsets = daemonsets?.filter(ds => showEmpty || ds.desired > 0);
-  const hiddenCount = (daemonsets?.length || 0) - (filteredDaemonsets?.length || 0);
-  const sort = useTableSort(filteredDaemonsets, DS_SORTERS);
+  const actionsFor = (ds: DaemonSetInfo): ActionMenuItem[] => [
+    {
+      label: 'Set image',
+      icon: <Box className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setImageTarget(ds),
+    },
+    {
+      label: 'Tail logs',
+      icon: <ScrollText className="w-4 h-4" />,
+      onClick: () => setTailTarget(ds),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(ds),
+    },
+  ];
 
   return (
     <div>
@@ -343,6 +376,7 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
               <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="upToDate" label="Up-to-date" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">Node Selector</th>
+              <SortableTh sortKey="lastRollout" label="Last Rollout" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
@@ -368,6 +402,7 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
                 </td>
                 <td className="px-4 py-3 text-sm">{ds.upToDate}</td>
                 <td className="px-4 py-3 text-sm text-gray-600 font-mono text-xs">{ds.nodeSelector}</td>
+                <td className="px-4 py-3 text-sm text-gray-600">{ds.lastRollout || '—'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{ds.age}</td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <ActionMenu
@@ -377,25 +412,11 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
                         icon: <Info className="w-4 h-4" />,
                         onClick: () => setSelectedDaemonSet(ds),
                       },
-                      {
-                        label: 'Set image',
-                        icon: <Box className="w-4 h-4" />,
-                        disabled: !canPatch,
-                        title: patchTitle,
-                        onClick: () => setImageTarget(ds),
-                      },
+                      ...actionsFor(ds),
                       {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlDaemonSet(ds),
-                      },
-                      {
-                        label: 'Delete',
-                        icon: <Trash2 className="w-4 h-4" />,
-                        variant: 'danger',
-                        disabled: !canDelete,
-                        title: deleteTitle,
-                        onClick: () => setDeleteTarget(ds),
                       },
                     ]}
                   />
@@ -418,6 +439,24 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
           namespace={yamlDaemonSet.namespace}
           name={yamlDaemonSet.name}
           onClose={() => setYamlDaemonSet(null)}
+        />
+      )}
+      {tailTarget && (
+        <TailLogsModal
+          title={`Logs · ${tailTarget.namespace}/${tailTarget.name}`}
+          queryKey={['tail-pods', 'daemonset', tailTarget.namespace, tailTarget.name]}
+          fetchPods={async () => {
+            const d = await api.workloads.getDaemonSet(tailTarget.namespace, tailTarget.name);
+            const seen = new Set<string>();
+            const pods: PodTarget[] = [];
+            for (const c of d.runningContainers || []) {
+              if (seen.has(c.podName)) continue;
+              seen.add(c.podName);
+              pods.push({ namespace: tailTarget.namespace, name: c.podName });
+            }
+            return pods;
+          }}
+          onClose={() => setTailTarget(null)}
         />
       )}
       {imageTarget && (
@@ -461,6 +500,7 @@ export function DaemonSets({ namespace, isConnected = true }: DaemonSetsProps) {
           onViewYaml={() => {
             setYamlDaemonSet(selectedDaemonSet);
           }}
+          actions={actionsFor(selectedDaemonSet)}
         />
       )}
     </div>

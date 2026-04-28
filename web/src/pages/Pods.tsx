@@ -2,9 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { PodInfo } from '../services/api';
 import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal, Plug } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MultiTerminal } from '../components/MultiTerminal';
@@ -181,11 +182,12 @@ function LogModal({ pod, onClose }: { pod: PodInfo; onClose: () => void }) {
   );
 }
 
-function PodDetailsPanel({ pod, onClose, onViewLogs, onViewYaml }: {
+function PodDetailsPanel({ pod, onClose, onViewLogs, onViewYaml, actions }: {
   pod: PodInfo;
   onClose: () => void;
   onViewLogs: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: podDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['pod-details', pod.namespace, pod.name],
@@ -219,6 +221,7 @@ function PodDetailsPanel({ pod, onClose, onViewLogs, onViewYaml }: {
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -337,9 +340,13 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
   const [terminalMinimized, setTerminalMinimized] = useState(false);
   const [portForwardPod, setPortForwardPod] = useState<PodInfo | null>(null);
+  // Monotonic counter for unique session ids (Date.now in render trips the
+  // react-hooks/purity lint; useRef keeps it stable + lint-clean).
+  const sessionCounter = useRef(0);
 
   const openTerminal = (pod: PodInfo, containerName?: string) => {
-    const sessionId = `${pod.namespace}/${pod.name}${containerName ? `/${containerName}` : ''}-${Date.now()}`;
+    sessionCounter.current += 1;
+    const sessionId = `${pod.namespace}/${pod.name}${containerName ? `/${containerName}` : ''}-${sessionCounter.current}`;
     setTerminalSessions((prev) => [
       ...prev,
       {
@@ -399,6 +406,27 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
   if (error) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
+
+  const actionsFor = (pod: PodInfo): ActionMenuItem[] => [
+    {
+      label: 'Shell',
+      icon: <Terminal className="w-4 h-4" />,
+      onClick: () => openTerminal(pod),
+    },
+    {
+      label: 'Port Forward',
+      icon: <Plug className="w-4 h-4" />,
+      onClick: () => setPortForwardPod(pod),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(pod),
+    },
+  ];
 
   return (
     <div>
@@ -509,6 +537,7 @@ export function Pods({ namespace, isConnected = true }: PodsProps) {
       {selectedPod && (
         <PodDetailsPanel
           pod={selectedPod}
+          actions={actionsFor(selectedPod)}
           onClose={() => setSelectedPod(null)}
           onViewLogs={() => {
             setLogPod(selectedPod);

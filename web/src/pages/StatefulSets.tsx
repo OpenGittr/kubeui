@@ -1,15 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { StatefulSetInfo } from '../services/api';
-import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
+import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Box, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { SetImageModal } from '../components/SetImageModal';
+import { TailLogsModal } from '../components/MultiPodLogModal';
+import type { PodTarget } from '../components/MultiPodLogModal';
+import { MiniReplicasBar } from './HPA';
+import { Link } from 'react-router-dom';
+import { selectedHref } from '../hooks/useSelectedResource';
+import { ExternalLink, Activity } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource } from '../hooks/useSelectedResource';
 import { useTableSort, ageSeconds } from '../hooks/useTableSort';
@@ -19,7 +26,10 @@ const STS_SORTERS = {
   name: (s: StatefulSetInfo) => s.name,
   namespace: (s: StatefulSetInfo) => s.namespace,
   ready: (s: StatefulSetInfo) => s.readyReplicas ?? 0,
-  replicas: (s: StatefulSetInfo) => s.replicas,
+  // Sort by max-bound when HPA-managed, else by current replicas — matches
+  // the Deployment list behaviour.
+  replicas: (s: StatefulSetInfo) => s.hpa ? s.hpa.maxReplicas : s.replicas,
+  lastRollout: (s: StatefulSetInfo) => -ageSeconds(s.lastRollout || s.age),
   age: (s: StatefulSetInfo) => -ageSeconds(s.age),
 };
 
@@ -46,10 +56,12 @@ function StatefulSetDetailsPanel({
   statefulset,
   onClose,
   onViewYaml,
+  actions,
 }: {
   statefulset: StatefulSetInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: statefulsetDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['statefulset-details', statefulset.namespace, statefulset.name],
@@ -78,6 +90,7 @@ function StatefulSetDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -114,6 +127,29 @@ function StatefulSetDetailsPanel({
             </div>
           )}
         </div>
+
+        {/* Autoscaling — when an HPA targets this StatefulSet. */}
+        {details.hpa && (
+          <div className="bg-blue-50 border border-blue-200 p-3 rounded">
+            <div className="flex items-center gap-2 mb-2">
+              <Activity className="w-4 h-4 text-blue-700" />
+              <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Autoscaled by HPA</span>
+              <Link
+                to={selectedHref('/hpa', statefulset.namespace, details.hpa.name)}
+                className="text-sm font-mono text-blue-700 hover:underline inline-flex items-center gap-1"
+                title="Open the HorizontalPodAutoscaler detail"
+              >
+                {details.hpa.name}
+                <ExternalLink className="w-3 h-3 opacity-70" />
+              </Link>
+            </div>
+            <MiniReplicasBar
+              min={details.hpa.minReplicas}
+              max={details.hpa.maxReplicas}
+              current={statefulset.replicas}
+            />
+          </div>
+        )}
 
         {/* Running Pods */}
         <div>
@@ -240,6 +276,7 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
   const [deleteTarget, setDeleteTarget] = useState<StatefulSetInfo | null>(null);
   const [selectedStatefulSet, setSelectedStatefulSet] = useState<StatefulSetInfo | null>(null);
   const [imageTarget, setImageTarget] = useState<StatefulSetInfo | null>(null);
+  const [tailTarget, setTailTarget] = useState<StatefulSetInfo | null>(null);
   const { can } = usePermissions(namespace, STS_CHECKS);
   const canPatch = can('patch', 'apps', 'statefulsets');
   const canDelete = can('delete', 'apps', 'statefulsets');
@@ -278,6 +315,30 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  // Single source of truth for menu items shared by row + detail panel.
+  const actionsFor = (ss: StatefulSetInfo): ActionMenuItem[] => [
+    {
+      label: 'Set image',
+      icon: <Box className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setImageTarget(ss),
+    },
+    {
+      label: 'Tail logs',
+      icon: <ScrollText className="w-4 h-4" />,
+      onClick: () => setTailTarget(ss),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(ss),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -298,7 +359,8 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
               <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
-              <SortableTh sortKey="replicas" label="Replicas" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="replicas" label="Replicas / HPA" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="lastRollout" label="Last Rollout" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
@@ -322,7 +384,21 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
                   <td className="px-4 py-3 text-sm">
                     <ReadyBadge ready={ready} total={total} />
                   </td>
-                  <td className="px-4 py-3 text-sm">{ss.replicas}</td>
+                  <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
+                    {ss.hpa ? (
+                      <Link
+                        to={selectedHref('/hpa', ss.namespace, ss.hpa.name)}
+                        className="inline-flex items-center gap-2 px-1 -mx-1 py-0.5 rounded hover:bg-blue-50"
+                        title={`Autoscaled by HPA ${ss.hpa.name} (min ${ss.hpa.minReplicas} · max ${ss.hpa.maxReplicas}). Click to open.`}
+                      >
+                        <MiniReplicasBar min={ss.hpa.minReplicas} max={ss.hpa.maxReplicas} current={ss.replicas} />
+                        <ExternalLink className="w-3 h-3 text-gray-400 opacity-60" />
+                      </Link>
+                    ) : (
+                      <span className="font-mono">{ss.replicas}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{ss.lastRollout || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{ss.age}</td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <ActionMenu
@@ -332,25 +408,11 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
                           icon: <Info className="w-4 h-4" />,
                           onClick: () => setSelectedStatefulSet(ss),
                         },
-                        {
-                          label: 'Set image',
-                          icon: <Box className="w-4 h-4" />,
-                          disabled: !canPatch,
-                          title: patchTitle,
-                          onClick: () => setImageTarget(ss),
-                        },
+                        ...actionsFor(ss),
                         {
                           label: 'View YAML',
                           icon: <FileCode className="w-4 h-4" />,
                           onClick: () => setYamlStatefulSet(ss),
-                        },
-                        {
-                          label: 'Delete',
-                          icon: <Trash2 className="w-4 h-4" />,
-                          variant: 'danger',
-                          disabled: !canDelete,
-                          title: deleteTitle,
-                          onClick: () => setDeleteTarget(ss),
                         },
                       ]}
                     />
@@ -372,6 +434,24 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
           namespace={yamlStatefulSet.namespace}
           name={yamlStatefulSet.name}
           onClose={() => setYamlStatefulSet(null)}
+        />
+      )}
+      {tailTarget && (
+        <TailLogsModal
+          title={`Logs · ${tailTarget.namespace}/${tailTarget.name}`}
+          queryKey={['tail-pods', 'statefulset', tailTarget.namespace, tailTarget.name]}
+          fetchPods={async () => {
+            const d = await api.workloads.getStatefulSet(tailTarget.namespace, tailTarget.name);
+            const seen = new Set<string>();
+            const pods: PodTarget[] = [];
+            for (const c of d.runningContainers || []) {
+              if (seen.has(c.podName)) continue;
+              seen.add(c.podName);
+              pods.push({ namespace: tailTarget.namespace, name: c.podName });
+            }
+            return pods;
+          }}
+          onClose={() => setTailTarget(null)}
         />
       )}
       {imageTarget && (
@@ -415,6 +495,7 @@ export function StatefulSets({ namespace, isConnected = true }: StatefulSetsProp
           onViewYaml={() => {
             setYamlStatefulSet(selectedStatefulSet);
           }}
+          actions={actionsFor(selectedStatefulSet)}
         />
       )}
     </div>

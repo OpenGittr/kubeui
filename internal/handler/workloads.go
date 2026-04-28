@@ -9,9 +9,42 @@ import (
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
+
+// latestRevisionAge returns the age string of the most recent
+// ControllerRevision belonging to the given workload (StatefulSet or
+// DaemonSet). The latest revision's CreationTimestamp is the canonical
+// "when did the current rollout start?" — kubectl rollout history reads
+// the same data. Returns empty string when no revision is found or on
+// error so callers can fall back to creation age.
+func latestRevisionAge(ctx context.Context, client kubernetes.Interface, namespace string, selector map[string]string) string {
+	if len(selector) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(selector))
+	for k, v := range selector {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+	}
+	revs, err := client.AppsV1().ControllerRevisions(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: strings.Join(parts, ","),
+	})
+	if err != nil || len(revs.Items) == 0 {
+		return ""
+	}
+	latest := revs.Items[0].CreationTimestamp.Time
+	for _, r := range revs.Items[1:] {
+		if r.CreationTimestamp.After(latest) {
+			latest = r.CreationTimestamp.Time
+		}
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	return formatAge(latest)
+}
 
 type WorkloadHandler struct {
 	k8s *service.K8sManager
@@ -32,6 +65,7 @@ type DaemonSetInfo struct {
 	Available         int32                    `json:"available"`
 	NodeSelector      string                   `json:"nodeSelector"`
 	Age               string                   `json:"age"`
+	LastRollout       string                   `json:"lastRollout,omitempty"`
 	Labels            map[string]string        `json:"labels,omitempty"`
 	Selector          map[string]string        `json:"selector,omitempty"`
 	ContainerDetails  []DaemonSetContainer     `json:"containerDetails,omitempty"`
@@ -90,6 +124,10 @@ func (h *WorkloadHandler) ListDaemonSets(ctx *gofr.Context) (interface{}, error)
 			nodeSelector = "<none>"
 		}
 
+		var selectorMatch map[string]string
+		if ds.Spec.Selector != nil {
+			selectorMatch = ds.Spec.Selector.MatchLabels
+		}
 		result = append(result, DaemonSetInfo{
 			Name:         ds.Name,
 			Namespace:    ds.Namespace,
@@ -100,6 +138,7 @@ func (h *WorkloadHandler) ListDaemonSets(ctx *gofr.Context) (interface{}, error)
 			Available:    ds.Status.NumberAvailable,
 			NodeSelector: nodeSelector,
 			Age:          formatAge(ds.CreationTimestamp.Time),
+			LastRollout:  latestRevisionAge(context.Background(), client, ds.Namespace, selectorMatch),
 		})
 	}
 
@@ -147,6 +186,7 @@ func (h *WorkloadHandler) GetDaemonSet(ctx *gofr.Context) (interface{}, error) {
 
 	if ds.Spec.Selector != nil {
 		info.Selector = ds.Spec.Selector.MatchLabels
+		info.LastRollout = latestRevisionAge(context.Background(), client, ds.Namespace, ds.Spec.Selector.MatchLabels)
 	}
 
 	// Container details from spec
@@ -334,9 +374,11 @@ type StatefulSetInfo struct {
 	CurrentReplicas   int32                       `json:"currentReplicas"`
 	UpdatedReplicas   int32                       `json:"updatedReplicas"`
 	Age               string                      `json:"age"`
+	LastRollout       string                      `json:"lastRollout,omitempty"`
 	ServiceName       string                      `json:"serviceName,omitempty"`
 	Labels            map[string]string           `json:"labels,omitempty"`
 	Selector          map[string]string           `json:"selector,omitempty"`
+	HPA               *WorkloadHPA                `json:"hpa,omitempty"`
 	ContainerDetails  []StatefulSetContainer      `json:"containerDetails,omitempty"`
 	Conditions        []StatefulSetCondition      `json:"conditions,omitempty"`
 	RunningContainers []StatefulSetRunningContainer `json:"runningContainers,omitempty"`
@@ -379,6 +421,8 @@ func (h *WorkloadHandler) ListStatefulSets(ctx *gofr.Context) (interface{}, erro
 		return nil, err
 	}
 
+	hpas := hpaTargetMap(context.Background(), client, namespace)
+
 	var result []StatefulSetInfo
 	for _, ss := range statefulsets.Items {
 		replicas := int32(0)
@@ -386,13 +430,24 @@ func (h *WorkloadHandler) ListStatefulSets(ctx *gofr.Context) (interface{}, erro
 			replicas = *ss.Spec.Replicas
 		}
 
-		result = append(result, StatefulSetInfo{
-			Name:      ss.Name,
-			Namespace: ss.Namespace,
-			Ready:     fmt.Sprintf("%d/%d", ss.Status.ReadyReplicas, replicas),
-			Replicas:  replicas,
-			Age:       formatAge(ss.CreationTimestamp.Time),
-		})
+		var selectorMatch map[string]string
+		if ss.Spec.Selector != nil {
+			selectorMatch = ss.Spec.Selector.MatchLabels
+		}
+		info := StatefulSetInfo{
+			Name:        ss.Name,
+			Namespace:   ss.Namespace,
+			Ready:       fmt.Sprintf("%d/%d", ss.Status.ReadyReplicas, replicas),
+			Replicas:    replicas,
+			Age:         formatAge(ss.CreationTimestamp.Time),
+			LastRollout: latestRevisionAge(context.Background(), client, ss.Namespace, selectorMatch),
+		}
+		if hpas != nil {
+			if h, ok := hpas[ss.Namespace+"/StatefulSet/"+ss.Name]; ok {
+				info.HPA = h
+			}
+		}
+		result = append(result, info)
 	}
 
 	return result, nil
@@ -433,6 +488,16 @@ func (h *WorkloadHandler) GetStatefulSet(ctx *gofr.Context) (interface{}, error)
 
 	if ss.Spec.Selector != nil {
 		info.Selector = ss.Spec.Selector.MatchLabels
+		info.LastRollout = latestRevisionAge(context.Background(), client, ss.Namespace, ss.Spec.Selector.MatchLabels)
+	}
+
+	// Attach HPA info if one targets this StatefulSet, mirroring the list
+	// handler. Backend cross-references so the detail panel can show the
+	// scaling bounds without a second client round-trip.
+	if hpas := hpaTargetMap(context.Background(), client, namespace); hpas != nil {
+		if hp, ok := hpas[namespace+"/StatefulSet/"+name]; ok {
+			info.HPA = hp
+		}
 	}
 
 	// Container details from spec

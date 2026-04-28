@@ -5,6 +5,7 @@ import { RefreshCw, FileCode, Trash2, X, ChevronRight, Info, Pencil, Plus, Save,
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MetadataTabs } from '../components/MetadataTabs';
@@ -228,10 +229,12 @@ function ConfigMapDetailsPanel({
   configmap,
   onClose,
   onViewYaml,
+  actions,
 }: {
   configmap: ConfigMapInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  actions?: ActionMenuItem[];
 }) {
   const { data: configmapDetails } = useQuery({
     queryKey: ['configmap-details', configmap.namespace, configmap.name],
@@ -260,6 +263,7 @@ function ConfigMapDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -394,6 +398,17 @@ export function ConfigMaps({ namespace, isConnected = true }: ConfigMapsProps) {
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  const actionsFor = (cm: ConfigMapInfo): ActionMenuItem[] => [
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(cm),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -504,6 +519,7 @@ export function ConfigMaps({ namespace, isConnected = true }: ConfigMapsProps) {
           onViewYaml={() => {
             setYamlConfigmap(selectedConfigmap);
           }}
+          actions={actionsFor(selectedConfigmap)}
         />
       )}
     </div>

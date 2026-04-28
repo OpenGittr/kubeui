@@ -1,15 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DeploymentInfo } from '../services/api';
-import { RefreshCw, RotateCcw, Scale, FileCode, Trash2, X, ChevronRight, Info, Box } from 'lucide-react';
+import { RefreshCw, RotateCcw, Scale, FileCode, Trash2, X, ChevronRight, Info, Box, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
+import type { ActionMenuItem } from '../components/ActionMenu';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard, PodContainersGroup } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { SetImageModal } from '../components/SetImageModal';
+import { TailLogsModal } from '../components/MultiPodLogModal';
+import type { PodTarget } from '../components/MultiPodLogModal';
+import { MiniReplicasBar } from './HPA';
+import { Link } from 'react-router-dom';
+import { selectedHref } from '../hooks/useSelectedResource';
+import { ExternalLink, Activity } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource } from '../hooks/useSelectedResource';
 import { useTableSort, ageSeconds } from '../hooks/useTableSort';
@@ -19,10 +26,35 @@ const DEPLOYMENT_SORTERS = {
   name: (d: DeploymentInfo) => d.name,
   namespace: (d: DeploymentInfo) => d.namespace,
   ready: (d: DeploymentInfo) => parseInt(d.ready.split('/')[0] || '0', 10),
-  upToDate: (d: DeploymentInfo) => d.upToDate,
-  available: (d: DeploymentInfo) => d.available,
+  // Sort by max-bound when HPA-managed (gives "biggest scaler first") else
+  // by current replicas. Mixed lists put HPA-managed workloads next to each
+  // other, ordered by their ceiling.
+  replicas: (d: DeploymentInfo) => d.hpa ? d.hpa.maxReplicas : d.replicas,
+  lastRollout: (d: DeploymentInfo) => -ageSeconds(d.lastRollout || d.age),
   age: (d: DeploymentInfo) => -ageSeconds(d.age),
 };
+
+/**
+ * Small dot next to ready/desired showing rollout-state at a glance:
+ *   green  = ready == desired AND uptodate == desired (steady state)
+ *   amber  = otherwise (rollout / scaling in progress)
+ * Hover shows the absolute counts so up-to-date and available aren't lost.
+ */
+function ReadyCell({ ready, replicas, upToDate, available }: {
+  ready: string; replicas: number; upToDate: number; available: number;
+}) {
+  const readyCount = parseInt(ready.split('/')[0] || '0', 10);
+  const steady = readyCount === replicas && upToDate === replicas && available === replicas;
+  return (
+    <span
+      className="inline-flex items-center gap-2 font-mono"
+      title={`ready ${readyCount}/${replicas} · up-to-date ${upToDate} · available ${available}`}
+    >
+      <span>{ready}</span>
+      <span className={`w-1.5 h-1.5 rounded-full ${steady ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+    </span>
+  );
+}
 
 const DEPLOYMENT_CHECKS = [
   { verb: 'patch', group: 'apps', resource: 'deployments' },
@@ -97,10 +129,14 @@ function DeploymentDetailsPanel({
   deployment,
   onClose,
   onViewYaml,
+  actions,
 }: {
   deployment: DeploymentInfo;
   onClose: () => void;
   onViewYaml: () => void;
+  /** Same items the row's ActionMenu uses, so the panel is a self-contained
+   *  workspace and the user doesn't have to close it to find the action. */
+  actions?: ActionMenuItem[];
 }) {
   const { data: deploymentDetails, isLoading: detailsLoading } = useQuery({
     queryKey: ['deployment-details', deployment.namespace, deployment.name],
@@ -129,6 +165,7 @@ function DeploymentDetailsPanel({
             <FileCode className="w-4 h-4" />
             YAML
           </button>
+          {actions && actions.length > 0 && <ActionMenu items={actions} />}
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-700">
             <X className="w-5 h-5" />
           </button>
@@ -163,6 +200,31 @@ function DeploymentDetailsPanel({
             <div className="font-medium">{details.strategy || '-'}</div>
           </div>
         </div>
+
+        {/* Autoscaling — present whenever an HPA targets this Deployment.
+            Shows the bounds + current position alongside a click-through to
+            the HPA's own detail page so users don't lose the relationship. */}
+        {details.hpa && (
+          <div className="bg-blue-50 border border-blue-200 p-3 rounded">
+            <div className="flex items-center gap-2 mb-2">
+              <Activity className="w-4 h-4 text-blue-700" />
+              <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Autoscaled by HPA</span>
+              <Link
+                to={selectedHref('/hpa', deployment.namespace, details.hpa.name)}
+                className="text-sm font-mono text-blue-700 hover:underline inline-flex items-center gap-1"
+                title="Open the HorizontalPodAutoscaler detail"
+              >
+                {details.hpa.name}
+                <ExternalLink className="w-3 h-3 opacity-70" />
+              </Link>
+            </div>
+            <MiniReplicasBar
+              min={details.hpa.minReplicas}
+              max={details.hpa.maxReplicas}
+              current={deployment.replicas}
+            />
+          </div>
+        )}
 
         {/* Running Pods */}
         <div>
@@ -294,6 +356,7 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
   const [deleteTarget, setDeleteTarget] = useState<DeploymentInfo | null>(null);
   const [selectedDeployment, setSelectedDeployment] = useState<DeploymentInfo | null>(null);
   const [imageTarget, setImageTarget] = useState<DeploymentInfo | null>(null);
+  const [tailTarget, setTailTarget] = useState<DeploymentInfo | null>(null);
   const { can } = usePermissions(namespace, DEPLOYMENT_CHECKS);
   const canPatch = can('patch', 'apps', 'deployments');
   const canDelete = can('delete', 'apps', 'deployments');
@@ -345,6 +408,46 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
     return <div className="text-red-500">Error: {(error as Error).message}</div>;
   }
 
+  // Single source of truth for the menu items, used by both the row's
+  // ActionMenu and the detail panel's header so the same actions appear in
+  // both places without duplicating the per-action state hooks.
+  const actionsFor = (dep: DeploymentInfo): ActionMenuItem[] => [
+    {
+      label: 'Scale',
+      icon: <Scale className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setScaleDeployment(dep),
+    },
+    {
+      label: 'Set image',
+      icon: <Box className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setImageTarget(dep),
+    },
+    {
+      label: 'Tail logs',
+      icon: <ScrollText className="w-4 h-4" />,
+      onClick: () => setTailTarget(dep),
+    },
+    {
+      label: 'Restart',
+      icon: <RotateCcw className="w-4 h-4" />,
+      disabled: !canPatch,
+      title: patchTitle,
+      onClick: () => setRestartTarget(dep),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(dep),
+    },
+  ];
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -365,8 +468,8 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
               <SortableTh sortKey="name" label="Name" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="namespace" label="Namespace" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="ready" label="Ready" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
-              <SortableTh sortKey="upToDate" label="Up-to-date" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
-              <SortableTh sortKey="available" label="Available" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="replicas" label="Replicas / HPA" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
+              <SortableTh sortKey="lastRollout" label="Last Rollout" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <SortableTh sortKey="age" label="Age" active={sort.sortKey} direction={sort.direction} onToggle={sort.toggle} />
               <th className="text-right px-4 py-3 text-sm font-medium text-gray-600">Actions</th>
             </tr>
@@ -385,9 +488,24 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-600">{dep.namespace}</td>
-                <td className="px-4 py-3 text-sm">{dep.ready}</td>
-                <td className="px-4 py-3 text-sm">{dep.upToDate}</td>
-                <td className="px-4 py-3 text-sm">{dep.available}</td>
+                <td className="px-4 py-3 text-sm">
+                  <ReadyCell ready={dep.ready} replicas={dep.replicas} upToDate={dep.upToDate} available={dep.available} />
+                </td>
+                <td className="px-4 py-3 text-sm" onClick={(e) => e.stopPropagation()}>
+                  {dep.hpa ? (
+                    <Link
+                      to={selectedHref('/hpa', dep.namespace, dep.hpa.name)}
+                      className="inline-flex items-center gap-2 px-1 -mx-1 py-0.5 rounded hover:bg-blue-50"
+                      title={`Autoscaled by HPA ${dep.hpa.name} (min ${dep.hpa.minReplicas} · max ${dep.hpa.maxReplicas}). Click to open.`}
+                    >
+                      <MiniReplicasBar min={dep.hpa.minReplicas} max={dep.hpa.maxReplicas} current={dep.replicas} />
+                      <ExternalLink className="w-3 h-3 text-gray-400 opacity-60" />
+                    </Link>
+                  ) : (
+                    <span className="font-mono">{dep.replicas}</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-600">{dep.lastRollout || '—'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{dep.age}</td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <ActionMenu
@@ -397,39 +515,11 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
                         icon: <Info className="w-4 h-4" />,
                         onClick: () => setSelectedDeployment(dep),
                       },
-                      {
-                        label: 'Scale',
-                        icon: <Scale className="w-4 h-4" />,
-                        disabled: !canPatch,
-                        title: patchTitle,
-                        onClick: () => setScaleDeployment(dep),
-                      },
-                      {
-                        label: 'Set image',
-                        icon: <Box className="w-4 h-4" />,
-                        disabled: !canPatch,
-                        title: patchTitle,
-                        onClick: () => setImageTarget(dep),
-                      },
-                      {
-                        label: 'Restart',
-                        icon: <RotateCcw className="w-4 h-4" />,
-                        disabled: !canPatch,
-                        title: patchTitle,
-                        onClick: () => setRestartTarget(dep),
-                      },
+                      ...actionsFor(dep),
                       {
                         label: 'View YAML',
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlDeployment(dep),
-                      },
-                      {
-                        label: 'Delete',
-                        icon: <Trash2 className="w-4 h-4" />,
-                        variant: 'danger',
-                        disabled: !canDelete,
-                        title: deleteTitle,
-                        onClick: () => setDeleteTarget(dep),
                       },
                     ]}
                   />
@@ -463,6 +553,24 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
           }}
           setImage={api.deployments.setImage}
           invalidateKeys={[['deployments'], ['deployment-details', imageTarget.namespace, imageTarget.name]]}
+        />
+      )}
+      {tailTarget && (
+        <TailLogsModal
+          title={`Logs · ${tailTarget.namespace}/${tailTarget.name}`}
+          queryKey={['tail-pods', 'deployment', tailTarget.namespace, tailTarget.name]}
+          fetchPods={async () => {
+            const d = await api.deployments.get(tailTarget.namespace, tailTarget.name);
+            const seen = new Set<string>();
+            const pods: PodTarget[] = [];
+            for (const c of d.runningContainers || []) {
+              if (seen.has(c.podName)) continue;
+              seen.add(c.podName);
+              pods.push({ namespace: tailTarget.namespace, name: c.podName });
+            }
+            return pods;
+          }}
+          onClose={() => setTailTarget(null)}
         />
       )}
       {yamlDeployment && (
@@ -517,6 +625,7 @@ export function Deployments({ namespace, isConnected = true }: DeploymentsProps)
           onViewYaml={() => {
             setYamlDeployment(selectedDeployment);
           }}
+          actions={actionsFor(selectedDeployment)}
         />
       )}
     </div>

@@ -30,9 +30,17 @@ type DeploymentInfo struct {
 	UpToDate   int32             `json:"upToDate"`
 	Available  int32             `json:"available"`
 	Age        string            `json:"age"`
+	// LastRollout is the duration-formatted age of the most recent rollout
+	// activity, computed from the Progressing condition's LastUpdateTime.
+	// Falls back to Age (creation) when no Progressing condition is present.
+	LastRollout string            `json:"lastRollout,omitempty"`
 	Replicas   int32             `json:"replicas"`
 	Labels     map[string]string `json:"labels,omitempty"`
 	Containers []string          `json:"containers,omitempty"`
+	// HPA, if one targets this workload via spec.scaleTargetRef. The list
+	// handler cross-references at fetch time so the frontend doesn't need a
+	// second round-trip to know about autoscaling bounds.
+	HPA *WorkloadHPA `json:"hpa,omitempty"`
 	// Detailed fields
 	Strategy          string                    `json:"strategy,omitempty"`
 	Selector          map[string]string         `json:"selector,omitempty"`
@@ -40,6 +48,14 @@ type DeploymentInfo struct {
 	ContainerDetails  []DeploymentContainer     `json:"containerDetails,omitempty"`
 	Conditions        []DeploymentCondition     `json:"conditions,omitempty"`
 	RunningContainers []RunningContainer        `json:"runningContainers,omitempty"`
+}
+
+// WorkloadHPA is the slice of an HPA that the list view needs to render the
+// scaling-band bar next to ready/desired counts.
+type WorkloadHPA struct {
+	Name        string `json:"name"`
+	MinReplicas int32  `json:"minReplicas"`
+	MaxReplicas int32  `json:"maxReplicas"`
 }
 
 // RunningContainer represents a container instance running in a pod
@@ -94,9 +110,17 @@ func (h *DeploymentHandler) List(ctx *gofr.Context) (interface{}, error) {
 		return nil, err
 	}
 
+	hpas := hpaTargetMap(context.Background(), client, namespace)
+
 	var result []DeploymentInfo
 	for _, d := range deployments.Items {
-		result = append(result, deploymentToInfo(&d, false))
+		info := deploymentToInfo(&d, false)
+		if hpas != nil {
+			if h, ok := hpas[d.Namespace+"/Deployment/"+d.Name]; ok {
+				info.HPA = h
+			}
+		}
+		result = append(result, info)
 	}
 
 	return result, nil
@@ -123,7 +147,15 @@ func (h *DeploymentHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		runningContainers = h.fetchRunningContainers(namespace, deployment.Spec.Selector.MatchLabels)
 	}
 
-	return deploymentToInfoWithRunningContainers(deployment, runningContainers, client, namespace), nil
+	info := deploymentToInfoWithRunningContainers(deployment, runningContainers, client, namespace)
+	// Attach HPA info so the detail panel can render the autoscaler bar
+	// without an extra round-trip.
+	if hpas := hpaTargetMap(context.Background(), client, namespace); hpas != nil {
+		if hp, ok := hpas[namespace+"/Deployment/"+name]; ok {
+			info.HPA = hp
+		}
+	}
+	return info, nil
 }
 
 // fetchRunningContainers gets all running container instances from pods matching the selector
@@ -390,14 +422,26 @@ func deploymentToInfoWithRunningContainers(d *appsv1.Deployment, runningContaine
 		replicas = *d.Spec.Replicas
 	}
 
+	// Last rollout: most recent LastUpdateTime on the Progressing condition.
+	// This bumps every time the rollout starts, completes, or restarts —
+	// matching what an operator means by "when was this last deployed?".
+	lastRolloutAge := ""
+	for _, c := range d.Status.Conditions {
+		if c.Type == appsv1.DeploymentProgressing && !c.LastUpdateTime.IsZero() {
+			lastRolloutAge = formatAge(c.LastUpdateTime.Time)
+			break
+		}
+	}
+
 	info := DeploymentInfo{
-		Name:      d.Name,
-		Namespace: d.Namespace,
-		Ready:     fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, replicas),
-		UpToDate:  d.Status.UpdatedReplicas,
-		Available: d.Status.AvailableReplicas,
-		Age:       formatAge(d.CreationTimestamp.Time),
-		Replicas:  replicas,
+		Name:        d.Name,
+		Namespace:   d.Namespace,
+		Ready:       fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, replicas),
+		UpToDate:    d.Status.UpdatedReplicas,
+		Available:   d.Status.AvailableReplicas,
+		Age:         formatAge(d.CreationTimestamp.Time),
+		LastRollout: lastRolloutAge,
+		Replicas:    replicas,
 	}
 
 	info.Labels = d.Labels
