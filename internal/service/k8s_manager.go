@@ -275,20 +275,43 @@ func parseGKEProject(contextName string) string {
 	return parts[0]
 }
 
-// gcloudAccountForProject walks gcloud's credentialed accounts and returns
-// the first one that can describe the given project. Returns "" if gcloud is
-// unavailable or no account has access.
+// gcloudAccountForProject returns a credentialed gcloud account that can
+// access the given project. It checks the currently active account first
+// so that it matches what kubectl would use, then falls back to other
+// credentialed accounts.
 func gcloudAccountForProject(project string) string {
+	active := gcloudActiveAccount()
+	if active != "" && gcloudAccountHasProjectAccess(active, project) {
+		return active
+	}
+
 	accounts, err := gcloudListAccounts()
 	if err != nil || len(accounts) == 0 {
 		return ""
 	}
 	for _, acc := range accounts {
+		if acc == active {
+			continue // already checked
+		}
 		if gcloudAccountHasProjectAccess(acc, project) {
 			return acc
 		}
 	}
 	return ""
+}
+
+// gcloudActiveAccount returns the currently active gcloud account.
+func gcloudActiveAccount() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gcloud", "auth", "list",
+		"--filter=status:ACTIVE", "--format=value(account)")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func gcloudListAccounts() ([]string, error) {
