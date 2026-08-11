@@ -21,7 +21,7 @@ dev-frontend:
 	cd web && npm run dev
 
 dev-backend:
-	go run ./cmd/main.go --no-browser
+	go run ./cmd/main.go --no-browser --port 4610
 
 # Clean build artifacts
 clean:

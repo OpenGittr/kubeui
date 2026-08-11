@@ -40,8 +40,11 @@ Please be respectful and constructive in all interactions. We welcome contributo
    ```
 
 4. **Access the application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:9090
+   - Frontend (Vite dev server, hot reload): http://localhost:4600
+   - Backend API: http://localhost:4610
+
+   The dev server proxies `/api` to the backend, so use the frontend URL.
+   A standalone binary serves both from a single port (`--port`, default 8080).
 
 ### Building
 
