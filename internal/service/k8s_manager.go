@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/oauth2"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -30,7 +32,10 @@ type K8sManager struct {
 	// accountByProject caches the resolved gcloud account per GCP project,
 	// used when a GKE context's auth plugin has no explicit --account arg.
 	accountByProject map[string]string
-	mu               sync.RWMutex
+	// tokenSources holds self-refreshing OAuth token sources keyed by cloud
+	// account, so kubeui can authenticate without the exec plugin.
+	tokenSources map[string]oauth2.TokenSource
+	mu           sync.RWMutex
 }
 
 // ClusterInfo represents a Kubernetes cluster context
@@ -64,6 +69,7 @@ func NewK8sManager() (*K8sManager, error) {
 		clients:          make(map[string]*kubernetes.Clientset),
 		metricsClients:   make(map[string]*metricsv.Clientset),
 		accountByProject: make(map[string]string),
+		tokenSources:     make(map[string]oauth2.TokenSource),
 	}, nil
 }
 
@@ -162,11 +168,15 @@ func (m *K8sManager) GetClient() (*kubernetes.Clientset, error) {
 
 // buildConfig creates a rest.Config for the specified context
 func (m *K8sManager) buildConfig(contextName string) (*rest.Config, error) {
+	// Resolve the account once: both the exec fallback and the native token
+	// source need it, and resolution can involve gcloud subprocesses.
+	account := m.gkeAccount(contextName)
+
 	configOverrides := &clientcmd.ConfigOverrides{
 		CurrentContext: contextName,
 	}
 
-	if override := m.authInfoOverride(contextName); override != nil {
+	if override := m.authInfoOverride(contextName, account); override != nil {
 		configOverrides.AuthInfo = *override
 	}
 
@@ -175,14 +185,123 @@ func (m *K8sManager) buildConfig(contextName string) (*rest.Config, error) {
 		configOverrides,
 	)
 
-	return clientConfig.ClientConfig()
+	restConfig, err := clientConfig.ClientConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	m.applyNativeAuth(contextName, account, restConfig)
+
+	return restConfig, nil
+}
+
+// applyNativeAuth replaces the kubeconfig exec plugin with an in-process OAuth
+// token source when kubeui can mint tokens itself. Two things this buys us:
+// the gke-gcloud-auth-plugin binary no longer has to exist on PATH, and token
+// expiry becomes invisible because the token source refreshes silently instead
+// of a subprocess exiting 1 mid-session.
+//
+// Anything we can't handle natively is left on the exec plugin untouched.
+func (m *K8sManager) applyNativeAuth(contextName, account string, cfg *rest.Config) {
+	if cfg.ExecProvider == nil || account == "" {
+		return
+	}
+	if m.providerFor(contextName) != ProviderGKE {
+		return
+	}
+
+	ts, err := m.tokenSourceFor(account)
+	if err != nil {
+		return // no stored credential — fall back to the exec plugin
+	}
+
+	// ExecProvider and WrapTransport are mutually exclusive in client-go, and
+	// the wrapper is what SPDY (exec, port-forward) picks up too.
+	cfg.ExecProvider = nil
+	cfg.AuthProvider = nil
+	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return &oauth2.Transport{Source: ts, Base: rt}
+	})
+}
+
+// tokenSourceFor returns a cached, self-refreshing token source for a Google
+// account.
+func (m *K8sManager) tokenSourceFor(account string) (oauth2.TokenSource, error) {
+	m.mu.RLock()
+	ts, exists := m.tokenSources[account]
+	m.mu.RUnlock()
+	if exists {
+		return ts, nil
+	}
+
+	ts, err := gcloudTokenSource(context.Background(), account)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.tokenSources[account]; ok {
+		return existing, nil
+	}
+	m.tokenSources[account] = ts
+	return ts, nil
+}
+
+// providerFor classifies the credential mechanism behind a context.
+func (m *K8sManager) providerFor(contextName string) Provider {
+	return detectProvider(m.authInfoFor(contextName))
+}
+
+func (m *K8sManager) authInfoFor(contextName string) *api.AuthInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ctx, ok := m.config.Contexts[contextName]
+	if !ok {
+		return nil
+	}
+	return m.config.AuthInfos[ctx.AuthInfo]
+}
+
+// gkeAccount resolves which Google account a GKE context should authenticate
+// as, and returns "" for every other kind of context. Explicit config wins,
+// then a sibling context in the same project, then gcloud's own probing, and
+// finally gcloud's active account — which is what the auth plugin would have
+// used anyway, and is readable from disk even when the credential is expired.
+func (m *K8sManager) gkeAccount(contextName string) string {
+	authInfo := m.authInfoFor(contextName)
+	if detectProvider(authInfo) != ProviderGKE {
+		return ""
+	}
+
+	if authInfo.Exec != nil {
+		for _, a := range authInfo.Exec.Args {
+			if strings.HasPrefix(a, "--account=") {
+				return strings.TrimPrefix(a, "--account=")
+			}
+		}
+	}
+
+	if project := parseGKEProject(contextName); project != "" {
+		if account := m.resolveAccount(project); account != "" {
+			return account
+		}
+	}
+
+	return gcloudConfigAccount()
 }
 
 // authInfoOverride injects --account for GKE contexts whose gke-gcloud-auth-plugin
 // exec config has no --account arg. Without this, the plugin uses gcloud's
 // globally-active account, which often doesn't match the project's intended user
-// and produces 403 errors on listing cluster-scoped resources.
-func (m *K8sManager) authInfoOverride(contextName string) *api.AuthInfo {
+// and produces 403 errors on listing cluster-scoped resources. Only matters on
+// the fallback path — applyNativeAuth drops the exec plugin when it can.
+func (m *K8sManager) authInfoOverride(contextName, account string) *api.AuthInfo {
+	if account == "" {
+		return nil
+	}
+
 	m.mu.RLock()
 	ctx, ok := m.config.Contexts[contextName]
 	if !ok {
@@ -202,16 +321,6 @@ func (m *K8sManager) authInfoOverride(contextName string) *api.AuthInfo {
 	}
 	originalExec := *authInfo.Exec
 	m.mu.RUnlock()
-
-	project := parseGKEProject(contextName)
-	if project == "" {
-		return nil
-	}
-
-	account := m.resolveAccount(project)
-	if account == "" {
-		return nil
-	}
 
 	newArgs := append([]string{}, originalExec.Args...)
 	newArgs = append(newArgs, "--account="+account)
@@ -338,6 +447,85 @@ func gcloudAccountHasProjectAccess(account, project string) bool {
 	cmd := exec.CommandContext(ctx, "gcloud", "projects", "describe", project,
 		"--account="+account, "--format=value(projectId)")
 	return cmd.Run() == nil
+}
+
+// Probe makes a cheap authenticated request against the current context so
+// credential problems surface as a classifiable error instead of hiding inside
+// a failed resource listing.
+func (m *K8sManager) Probe(ctx context.Context) error {
+	client, err := m.GetClient()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	_, err = client.Discovery().RESTClient().Get().AbsPath("/version").DoRaw(ctx)
+	return err
+}
+
+// AuthStatus reports the credential state of the current context, including
+// whether a re-login would fix it and what command that would run.
+func (m *K8sManager) AuthStatus(ctx context.Context) AuthStatus {
+	contextName := m.CurrentContext()
+
+	m.mu.RLock()
+	clusterName := ""
+	if kctx, ok := m.config.Contexts[contextName]; ok {
+		clusterName = kctx.Cluster
+	}
+	m.mu.RUnlock()
+
+	authInfo := m.authInfoFor(contextName)
+	provider := detectProvider(authInfo)
+
+	status := AuthStatus{
+		Context:  contextName,
+		Cluster:  clusterName,
+		Provider: provider,
+		Project:  parseGKEProject(contextName),
+	}
+
+	if provider == ProviderGKE {
+		status.Account = m.gkeAccount(contextName)
+		if status.Account != "" {
+			if _, err := m.tokenSourceFor(status.Account); err == nil {
+				status.Native = true
+			}
+		}
+	}
+
+	status.AWSProfile = awsProfile(authInfo)
+
+	argv, canLogin := loginCommand(provider, status.Account, status.AWSProfile)
+	status.CanLogin = canLogin
+	if canLogin {
+		status.LoginCommand = strings.Join(argv, " ")
+	}
+
+	if err := m.Probe(ctx); err != nil {
+		status.Error = err.Error()
+		status.NeedsLogin = IsAuthError(err)
+	} else {
+		status.Connected = true
+	}
+
+	return status
+}
+
+// InvalidateCredentials drops cached clients and token sources so the next
+// request picks up freshly written credentials. Called after a login completes.
+func (m *K8sManager) InvalidateCredentials() error {
+	m.mu.Lock()
+	m.clients = make(map[string]*kubernetes.Clientset)
+	m.metricsClients = make(map[string]*metricsv.Clientset)
+	m.tokenSources = make(map[string]oauth2.TokenSource)
+	m.accountByProject = make(map[string]string)
+	err := m.reloadLocked()
+	m.mu.Unlock()
+
+	return err
 }
 
 // GetDefaultNamespace returns the default namespace for the current context

@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Copy, Check, Edit2, Save, XCircle } from 'lucide-react';
 import { api } from '../services/api';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import CodeMirror from '@uiw/react-codemirror';
+import { yaml as yamlLang } from '@codemirror/lang-yaml';
 
 interface YamlModalProps {
   resourceType: string;
@@ -12,7 +14,8 @@ interface YamlModalProps {
   onClose: () => void;
 }
 
-// Editable code component with syntax highlighting
+// CodeMirror-based YAML editor. The previous transparent-textarea-over-
+// SyntaxHighlighter overlay broke input + scroll on large YAMLs.
 function EditableYaml({
   value,
   onChange,
@@ -20,61 +23,22 @@ function EditableYaml({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Sync scroll between textarea and highlighted code
-  const handleScroll = () => {
-    if (containerRef.current && textareaRef.current) {
-      const pre = containerRef.current.querySelector('pre');
-      if (pre) {
-        pre.scrollTop = textareaRef.current.scrollTop;
-        pre.scrollLeft = textareaRef.current.scrollLeft;
-      }
-    }
-  };
-
   return (
-    <div ref={containerRef} className="relative h-full">
-      {/* Syntax highlighted background */}
-      <SyntaxHighlighter
-        language="yaml"
-        style={oneDark}
-        showLineNumbers
-        customStyle={{
-          margin: 0,
-          borderRadius: 0,
-          minHeight: '100%',
-          fontSize: '13px',
-          pointerEvents: 'none',
-        }}
-        lineNumberStyle={{
-          minWidth: '3em',
-          paddingRight: '1em',
-          color: '#636d83',
-          userSelect: 'none',
-        }}
-      >
-        {value || ' '}
-      </SyntaxHighlighter>
-
-      {/* Transparent editable textarea overlay */}
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onScroll={handleScroll}
-        spellCheck={false}
-        className="absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-white focus:outline-none"
-        style={{
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-          fontSize: '13px',
-          lineHeight: '1.5',
-          padding: '1em',
-          paddingLeft: '4.5em', // Account for line numbers
-        }}
-      />
-    </div>
+    <CodeMirror
+      value={value}
+      onChange={onChange}
+      theme="dark"
+      extensions={[yamlLang()]}
+      height="100%"
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+        bracketMatching: true,
+        autocompletion: false,
+      }}
+      style={{ height: '100%', fontSize: '13px' }}
+    />
   );
 }
 
@@ -199,13 +163,13 @@ export function YamlModal({ resourceType, namespace, name, onClose }: YamlModalP
           </div>
         )}
 
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 min-h-0 overflow-auto">
           {isLoading ? (
             <div className="p-4 text-gray-500">Loading...</div>
           ) : error ? (
             <div className="p-4 text-red-500">Error: {(error as Error).message}</div>
           ) : isEditing ? (
-            <EditableYaml value={editedYaml} onChange={setEditedYaml} />
+            <EditableYaml key="yaml-editor" value={editedYaml} onChange={setEditedYaml} />
           ) : (
             <SyntaxHighlighter
               language="yaml"

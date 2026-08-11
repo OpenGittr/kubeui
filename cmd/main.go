@@ -96,7 +96,9 @@ func main() {
 	yamlHandler := handler.NewYAMLHandler(k8sManager)
 	crdHandler := handler.NewCRDHandler(k8sManager)
 	nodeHandler := handler.NewNodeHandler(k8sManager)
+	topologyHandler := handler.NewTopologyHandler(k8sManager)
 	workloadHandler := handler.NewWorkloadHandler(k8sManager)
+	revisionsHandler := handler.NewRevisionsHandler(k8sManager)
 	networkHandler := handler.NewNetworkHandler(k8sManager)
 	hpaHandler := handler.NewHPAHandler(k8sManager)
 	eventHandler := handler.NewEventHandler(k8sManager)
@@ -106,11 +108,17 @@ func main() {
 	portForwardHandler := handler.NewPortForwardHandler(k8sManager)
 	permissionHandler := handler.NewPermissionHandler(k8sManager)
 	healthHandler := handler.NewHealthHandler(k8sManager)
+	authHandler := handler.NewAuthHandler(k8sManager, service.NewLoginManager(k8sManager))
 
 	// Cluster routes
 	app.GET("/api/clusters", clusterHandler.List)
 	app.GET("/api/clusters/current", clusterHandler.Current)
 	app.POST("/api/clusters/switch", clusterHandler.Switch)
+
+	// Auth routes (credential status + cloud provider re-login)
+	app.GET("/api/auth/status", authHandler.Status)
+	app.POST("/api/auth/login", authHandler.Login)
+	app.GET("/api/auth/login/{id}", authHandler.LoginStatus)
 
 	// Namespace routes
 	app.GET("/api/namespaces", namespaceHandler.List)
@@ -136,6 +144,12 @@ func main() {
 	app.PATCH("/api/deployments/{namespace}/{name}/image", deploymentHandler.SetImage)
 	app.POST("/api/deployments/{namespace}/{name}/restart", deploymentHandler.Restart)
 	app.DELETE("/api/deployments/{namespace}/{name}", deploymentHandler.Delete)
+	app.GET("/api/deployments/{namespace}/{name}/revisions", revisionsHandler.DeploymentRevisions)
+	app.GET("/api/statefulsets/{namespace}/{name}/revisions", revisionsHandler.StatefulSetRevisions)
+	app.GET("/api/daemonsets/{namespace}/{name}/revisions", revisionsHandler.DaemonSetRevisions)
+	app.POST("/api/deployments/{namespace}/{name}/rollback", revisionsHandler.RollbackDeployment)
+	app.POST("/api/statefulsets/{namespace}/{name}/rollback", revisionsHandler.RollbackStatefulSet)
+	app.POST("/api/daemonsets/{namespace}/{name}/rollback", revisionsHandler.RollbackDaemonSet)
 
 	// Service routes
 	app.GET("/api/services", serviceHandler.List)
@@ -191,6 +205,7 @@ func main() {
 	app.GET("/api/nodes", nodeHandler.List)
 	app.PATCH("/api/nodes/{name}/cordon", nodeHandler.SetCordon)
 	app.GET("/api/nodes/{name}/binpacking", nodeHandler.BinPacking)
+	app.GET("/api/topology", topologyHandler.Get)
 
 	// Workload routes (DaemonSets, StatefulSets, ReplicaSets)
 	app.GET("/api/daemonsets", workloadHandler.ListDaemonSets)

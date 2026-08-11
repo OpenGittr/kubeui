@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { PodInfo } from '../services/api';
-import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Download, Play, Pause, Terminal, Plug } from 'lucide-react';
+import { Trash2, RefreshCw, FileText, FileCode, X, ChevronRight, Info, Terminal, Plug } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
@@ -11,6 +11,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MultiTerminal } from '../components/MultiTerminal';
 import type { TerminalSession } from '../components/MultiTerminal';
 import { PortForwardModal } from '../components/PortForwardModal';
+import { MultiPodLogModal } from '../components/MultiPodLogModal';
+import type { PodTarget } from '../components/MultiPodLogModal';
 import { ContainerCard } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
 import { usePermissions } from '../hooks/usePermissions';
@@ -55,11 +57,8 @@ function StatusBadge({ status }: { status: string }) {
 
 function LogModal({ pod, onClose }: { pod: PodInfo; onClose: () => void }) {
   const [selectedContainer, setSelectedContainer] = useState<string>('');
-  const [tailLines, setTailLines] = useState<number>(500);
-  const [follow, setFollow] = useState(false);
 
-  // Fetch pod details to get container list
-  const { data: podDetails } = useQuery({
+  const { data: podDetails, isLoading } = useQuery({
     queryKey: ['pod-details', pod.namespace, pod.name],
     queryFn: () => api.pods.get(pod.namespace, pod.name),
   });
@@ -67,118 +66,41 @@ function LogModal({ pod, onClose }: { pod: PodInfo; onClose: () => void }) {
   const containers = podDetails?.containers || [];
   const activeContainer = selectedContainer || containers[0]?.name || '';
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['pod-logs', pod.namespace, pod.name, activeContainer, tailLines],
-    queryFn: () => api.pods.logs(pod.namespace, pod.name, activeContainer || undefined, tailLines || undefined),
-    refetchInterval: follow ? 2000 : false,
-  });
+  if (isLoading || !podDetails) {
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
+        <div className="bg-[#1e1e1e] text-gray-100 rounded-lg px-6 py-4 text-sm">Loading containers...</div>
+      </div>
+    );
+  }
 
-  const handleDownload = () => {
-    if (!data?.logs) return;
-    const blob = new Blob([data.logs], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${pod.name}${activeContainer ? `-${activeContainer}` : ''}.log`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  const targets: PodTarget[] = [{
+    namespace: pod.namespace,
+    name: pod.name,
+    container: activeContainer || undefined,
+  }];
+
+  const containerSelector = containers.length > 1 ? (
+    <select
+      value={activeContainer}
+      onChange={(e) => setSelectedContainer(e.target.value)}
+      className="px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      title="Select container"
+    >
+      {containers.map((c) => (
+        <option key={c.name} value={c.name}>{c.name}</option>
+      ))}
+    </select>
+  ) : null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-4/5 h-4/5 flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Logs: {pod.name}
-            </h2>
-            <p className="text-sm text-gray-500">{pod.namespace}</p>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-4 p-3 border-b bg-gray-50 flex-wrap">
-          {/* Container selector */}
-          {containers.length > 1 && (
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600">Container:</label>
-              <select
-                value={activeContainer}
-                onChange={(e) => setSelectedContainer(e.target.value)}
-                className="px-2 py-1 text-sm border rounded bg-white"
-              >
-                {containers.map((c) => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          {containers.length === 1 && (
-            <div className="text-sm text-gray-600">
-              Container: <span className="font-medium">{containers[0].name}</span>
-            </div>
-          )}
-
-          {/* Tail lines */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Lines:</label>
-            <select
-              value={tailLines}
-              onChange={(e) => setTailLines(Number(e.target.value))}
-              className="px-2 py-1 text-sm border rounded bg-white"
-            >
-              <option value={100}>100</option>
-              <option value={500}>500</option>
-              <option value={1000}>1000</option>
-              <option value={5000}>5000</option>
-              <option value={0}>All</option>
-            </select>
-          </div>
-
-          {/* Follow toggle */}
-          <button
-            onClick={() => setFollow(!follow)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded ${
-              follow
-                ? 'bg-green-100 text-green-700 border border-green-300'
-                : 'bg-gray-100 text-gray-700 border border-gray-300'
-            }`}
-          >
-            {follow ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            {follow ? 'Following' : 'Follow'}
-          </button>
-
-          {/* Download button */}
-          <button
-            onClick={handleDownload}
-            disabled={!data?.logs}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 border border-gray-300 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="w-4 h-4" />
-            Download
-          </button>
-
-          {/* Loading indicator */}
-          {isFetching && !isLoading && (
-            <span className="text-xs text-gray-400">Refreshing...</span>
-          )}
-        </div>
-
-        {/* Log content */}
-        <div className="flex-1 overflow-auto p-4 bg-gray-900 text-gray-100 font-mono text-sm">
-          {isLoading ? (
-            <p className="text-gray-400">Loading logs...</p>
-          ) : (
-            <pre className="whitespace-pre-wrap">{data?.logs || 'No logs available'}</pre>
-          )}
-        </div>
-      </div>
-    </div>
+    <MultiPodLogModal
+      key={activeContainer}
+      title={`Logs · ${pod.namespace}/${pod.name}${activeContainer && containers.length === 1 ? ` · ${activeContainer}` : ''}`}
+      pods={targets}
+      headerExtra={containerSelector}
+      onClose={onClose}
+    />
   );
 }
 

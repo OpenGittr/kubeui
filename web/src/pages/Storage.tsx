@@ -1,7 +1,36 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
+import type { PVCInfo } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
 import { useState } from 'react';
+
+function humanBytes(n: number): string {
+  if (!n) return '0';
+  const units = ['B', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)}${units[i]}`;
+}
+
+function PVCFill({ pvc }: { pvc: PVCInfo }) {
+  if (pvc.fillPercent == null || !pvc.capacityBytes) {
+    return <span className="text-gray-400 text-xs" title="Install metrics or grant nodes/proxy to read kubelet stats">—</span>;
+  }
+  const pct = pvc.fillPercent;
+  const color = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-green-500';
+  return (
+    <div className="flex items-center gap-2 min-w-[140px]" title={`${humanBytes(pvc.usedBytes ?? 0)} / ${humanBytes(pvc.capacityBytes)}`}>
+      <div className="w-20 h-1.5 bg-gray-200 rounded overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <span className="text-xs text-gray-600 font-mono">{pct}%</span>
+    </div>
+  );
+}
 
 interface StorageProps {
   namespace?: string;
@@ -79,6 +108,7 @@ export function Storage({ namespace, isConnected = true }: StorageProps) {
             { key: 'status', header: 'Status', render: (item) => <StatusBadge status={item.status} /> },
             { key: 'volume', header: 'Volume', render: (item) => item.volume || '-' },
             { key: 'capacity', header: 'Capacity' },
+            { key: 'fillPercent', header: 'Used', render: (item) => <PVCFill pvc={item} /> },
             { key: 'accessModes', header: 'Access Modes' },
             { key: 'storageClass', header: 'Storage Class' },
             { key: 'age', header: 'Age', className: 'text-gray-600' },

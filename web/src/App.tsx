@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { ToastProvider } from './components/Toast';
 import { ThemeProvider } from './components/ThemeProvider';
 import { Overview } from './pages/Overview';
+import { Topology } from './pages/Topology';
 import { Pods } from './pages/Pods';
 import { Deployments } from './pages/Deployments';
 import { Services } from './pages/Services';
@@ -170,6 +171,7 @@ function AppContent() {
     >
       <Routes>
         <Route path="/" element={<Overview namespace={namespace} isConnected={connectionStatus === 'connected'} />} />
+        <Route path="/topology" element={<Topology namespace={namespace} isConnected={connectionStatus === 'connected'} />} />
         <Route path="/pods" element={<Pods namespace={namespace} isConnected={connectionStatus === 'connected'} />} />
         <Route path="/deployments" element={<Deployments namespace={namespace} isConnected={connectionStatus === 'connected'} />} />
         <Route path="/services" element={<Services namespace={namespace} isConnected={connectionStatus === 'connected'} />} />

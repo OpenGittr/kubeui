@@ -12,6 +12,9 @@ interface Props {
   title: string;
   pods: PodTarget[];
   onClose: () => void;
+  // Extra controls rendered in the header before the search box. Used by
+  // single-pod views to inject a container selector.
+  headerExtra?: React.ReactNode;
 }
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error';
@@ -306,7 +309,7 @@ function PlainRow({ podColor, podName, fullName, text }: { podColor: string; pod
  * scroll. Lines retain a per-pod colour tag so you can see at a glance which
  * replica is which.
  */
-export function MultiPodLogModal({ title, pods, onClose }: Props) {
+export function MultiPodLogModal({ title, pods, onClose, headerExtra }: Props) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState('');
@@ -466,6 +469,7 @@ export function MultiPodLogModal({ title, pods, onClose }: Props) {
             </div>
           )}
           <div className="flex-1" />
+          {headerExtra}
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
             <input

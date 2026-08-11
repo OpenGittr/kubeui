@@ -112,8 +112,16 @@ html.dark .text-yellow-900     { color: rgb(254 240 138); } /* yellow-200 */
 html.dark .text-yellow-800     { color: rgb(253 224 71);  } /* yellow-300 */
 html.dark .text-yellow-700     { color: rgb(253 224 71);  }
 html.dark .text-yellow-600     { color: rgb(250 204 21);  } /* yellow-400 */
-html.dark .text-amber-700      { color: rgb(252 211 77);  }
 html.dark .border-yellow-400   { border-color: rgb(250 204 21 / 0.55); }
+/* amber-* is a distinct hue from yellow-* in Tailwind and needs its own
+   overrides — without the bg/border pair, amber cards keep their cream
+   background while the text lightens, giving light-on-light. */
+html.dark .bg-amber-50         { background-color: rgb(245 158 11 / 0.12); }
+html.dark .bg-amber-100        { background-color: rgb(245 158 11 / 0.18); }
+html.dark .text-amber-800      { color: rgb(252 211 77);  } /* amber-300 */
+html.dark .text-amber-700      { color: rgb(252 211 77);  }
+html.dark .text-amber-600      { color: rgb(251 191 36);  } /* amber-400 */
+html.dark .border-amber-200    { border-color: rgb(245 158 11 / 0.4); }
 
 /* Red */
 html.dark .bg-red-50           { background-color: rgb(239 68 68 / 0.12); }

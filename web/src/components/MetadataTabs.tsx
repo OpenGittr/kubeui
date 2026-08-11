@@ -20,6 +20,10 @@ export interface Tab {
   secretData?: Record<string, string>; // For secret data with lock functionality
   envData?: ContainerEnv[]; // For environment variables
   multiline?: boolean;
+  // Arbitrary content for tabs that don't fit the K/V / env shape (e.g. an
+  // Events list or Rollout history). When set, this tab is always shown
+  // regardless of whether data/envData are populated.
+  content?: React.ReactNode;
 }
 
 interface MetadataTabsProps {
@@ -27,6 +31,7 @@ interface MetadataTabsProps {
 }
 
 function hasTabContent(tab: Tab): boolean {
+  if (tab.content !== undefined) return true;
   if (tab.data && Object.keys(tab.data).length > 0) return true;
   if (tab.secretData && Object.keys(tab.secretData).length > 0) return true;
   if (tab.envData?.some(c => c.env && c.env.length > 0)) return true;
@@ -79,14 +84,20 @@ export function MetadataTabs({ tabs }: MetadataTabsProps) {
         ))}
       </div>
       <div className="ml-1">
-        {activeTabData?.data && (
-          <KeyValueTable data={activeTabData.data} multiline={activeTabData.multiline} />
-        )}
-        {activeTabData?.secretData && (
-          <SecretDataTable data={activeTabData.secretData} />
-        )}
-        {activeTabData?.envData && (
-          <EnvTable containers={activeTabData.envData} />
+        {activeTabData?.content !== undefined ? (
+          activeTabData.content
+        ) : (
+          <>
+            {activeTabData?.data && (
+              <KeyValueTable data={activeTabData.data} multiline={activeTabData.multiline} />
+            )}
+            {activeTabData?.secretData && (
+              <SecretDataTable data={activeTabData.secretData} />
+            )}
+            {activeTabData?.envData && (
+              <EnvTable containers={activeTabData.envData} />
+            )}
+          </>
         )}
       </div>
     </div>

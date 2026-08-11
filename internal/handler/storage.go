@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
+	"time"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/opengittr/kubeui/internal/service"
 )
@@ -29,14 +33,104 @@ type PVInfo struct {
 }
 
 type PVCInfo struct {
-	Name         string `json:"name"`
-	Namespace    string `json:"namespace"`
-	Status       string `json:"status"`
-	Volume       string `json:"volume,omitempty"`
-	Capacity     string `json:"capacity"`
-	AccessModes  string `json:"accessModes"`
-	StorageClass string `json:"storageClass"`
-	Age          string `json:"age"`
+	Name          string `json:"name"`
+	Namespace     string `json:"namespace"`
+	Status        string `json:"status"`
+	Volume        string `json:"volume,omitempty"`
+	Capacity      string `json:"capacity"`
+	AccessModes   string `json:"accessModes"`
+	StorageClass  string `json:"storageClass"`
+	Age           string `json:"age"`
+	UsedBytes     int64  `json:"usedBytes,omitempty"`
+	CapacityBytes int64  `json:"capacityBytes,omitempty"`
+	FillPercent   int    `json:"fillPercent,omitempty"`
+}
+
+// kubeletVolumeStats is the minimal slice of kubelet's
+// /stats/summary response we read to pick up usedBytes/capacityBytes per
+// PVC. Pulling the full schema would mean importing kubelet APIs.
+type kubeletVolumeStats struct {
+	Pods []struct {
+		VolumeStats []struct {
+			Name          string  `json:"name,omitempty"`
+			UsedBytes     *uint64 `json:"usedBytes,omitempty"`
+			CapacityBytes *uint64 `json:"capacityBytes,omitempty"`
+			PVCRef        *struct {
+				Name      string `json:"name,omitempty"`
+				Namespace string `json:"namespace,omitempty"`
+			} `json:"pvcRef,omitempty"`
+		} `json:"volume,omitempty"`
+	} `json:"pods,omitempty"`
+}
+
+// fetchPVCUsage scrapes kubelet's stats/summary API on each node that hosts
+// pods mounting PVCs and returns a map keyed by "<ns>/<pvc>". Best-effort:
+// requires nodes/proxy permission; silently returns an empty map on errors
+// so the PVC list still renders without fill % data.
+func fetchPVCUsage(client *kubernetes.Clientset, namespace string) map[string][2]int64 {
+	result := map[string][2]int64{}
+
+	pods, err := client.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return result
+	}
+
+	// Collect target nodes (only ones with pods that mount a PVC in scope).
+	nodes := map[string]bool{}
+	for _, p := range pods.Items {
+		if p.Spec.NodeName == "" {
+			continue
+		}
+		for _, v := range p.Spec.Volumes {
+			if v.PersistentVolumeClaim == nil {
+				continue
+			}
+			if namespace != "" && p.Namespace != namespace {
+				continue
+			}
+			nodes[p.Spec.NodeName] = true
+			break
+		}
+	}
+
+	if len(nodes) == 0 {
+		return result
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	for node := range nodes {
+		wg.Add(1)
+		go func(node string) {
+			defer wg.Done()
+			data, err := client.CoreV1().RESTClient().Get().
+				AbsPath("/api/v1/nodes", node, "proxy", "stats/summary").
+				DoRaw(ctx)
+			if err != nil {
+				return
+			}
+			var s kubeletVolumeStats
+			if err := json.Unmarshal(data, &s); err != nil {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, p := range s.Pods {
+				for _, vol := range p.VolumeStats {
+					if vol.PVCRef == nil || vol.UsedBytes == nil || vol.CapacityBytes == nil {
+						continue
+					}
+					key := vol.PVCRef.Namespace + "/" + vol.PVCRef.Name
+					result[key] = [2]int64{int64(*vol.UsedBytes), int64(*vol.CapacityBytes)}
+				}
+			}
+		}(node)
+	}
+	wg.Wait()
+	return result
 }
 
 func (h *StorageHandler) ListPVs(ctx *gofr.Context) (interface{}, error) {
@@ -155,6 +249,8 @@ func (h *StorageHandler) ListPVCs(ctx *gofr.Context) (interface{}, error) {
 		return nil, err
 	}
 
+	usage := fetchPVCUsage(client, namespace)
+
 	var result []PVCInfo
 	for _, pvc := range pvcs.Items {
 		accessModes := ""
@@ -177,7 +273,7 @@ func (h *StorageHandler) ListPVCs(ctx *gofr.Context) (interface{}, error) {
 			storageClass = *pvc.Spec.StorageClassName
 		}
 
-		result = append(result, PVCInfo{
+		info := PVCInfo{
 			Name:         pvc.Name,
 			Namespace:    pvc.Namespace,
 			Status:       string(pvc.Status.Phase),
@@ -186,7 +282,13 @@ func (h *StorageHandler) ListPVCs(ctx *gofr.Context) (interface{}, error) {
 			AccessModes:  accessModes,
 			StorageClass: storageClass,
 			Age:          formatAge(pvc.CreationTimestamp.Time),
-		})
+		}
+		if u, ok := usage[pvc.Namespace+"/"+pvc.Name]; ok && u[1] > 0 {
+			info.UsedBytes = u[0]
+			info.CapacityBytes = u[1]
+			info.FillPercent = int(u[0] * 100 / u[1])
+		}
+		result = append(result, info)
 	}
 
 	return result, nil

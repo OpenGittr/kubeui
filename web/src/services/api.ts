@@ -339,6 +339,9 @@ export interface PVCInfo {
   accessModes: string;
   storageClass: string;
   age: string;
+  usedBytes?: number;
+  capacityBytes?: number;
+  fillPercent?: number;
 }
 
 export interface CRDInfo {
@@ -710,7 +713,43 @@ export interface LimitRangeInfo {
   age: string;
 }
 
+export type AuthProvider = 'gke' | 'eks' | 'aks' | 'oidc' | 'exec' | 'static' | 'unknown';
+
+export interface AuthStatus {
+  context: string;
+  cluster?: string;
+  provider: AuthProvider;
+  account?: string;
+  project?: string;
+  awsProfile?: string;
+  /** True when kubeui mints tokens in-process instead of using the exec plugin. */
+  native: boolean;
+  connected: boolean;
+  needsLogin: boolean;
+  error?: string;
+  loginCommand?: string;
+  canLogin: boolean;
+}
+
+export interface LoginSession {
+  id: string;
+  command: string;
+  provider: string;
+  running: boolean;
+  output: string;
+  error?: string;
+  authUrl?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
 export const api = {
+  auth: {
+    status: () => request<AuthStatus>('/auth/status'),
+    login: () => request<LoginSession>('/auth/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<LoginSession>(`/auth/login/${id}`),
+  },
+
   clusters: {
     list: () => request<ClusterInfo[]>('/clusters'),
     current: () => request<{ context: string; namespace: string }>('/clusters/current'),
@@ -782,6 +821,30 @@ export const api = {
       }),
     delete: (namespace: string, name: string) =>
       request<{ message: string }>(`/deployments/${namespace}/${name}`, { method: 'DELETE' }),
+    revisions: (namespace: string, name: string) =>
+      request<RevisionInfo[]>(`/deployments/${namespace}/${name}/revisions`),
+    rollback: (namespace: string, name: string, revision: number) =>
+      request<{ status: string; toRevision: number }>(`/deployments/${namespace}/${name}/rollback`, {
+        method: 'POST',
+        body: JSON.stringify({ revision }),
+      }),
+  },
+
+  workloadRevisions: {
+    statefulset: (namespace: string, name: string) =>
+      request<RevisionInfo[]>(`/statefulsets/${namespace}/${name}/revisions`),
+    daemonset: (namespace: string, name: string) =>
+      request<RevisionInfo[]>(`/daemonsets/${namespace}/${name}/revisions`),
+    rollbackStatefulSet: (namespace: string, name: string, revisionName: string) =>
+      request<{ status: string; toRevision: string }>(`/statefulsets/${namespace}/${name}/rollback`, {
+        method: 'POST',
+        body: JSON.stringify({ revisionName }),
+      }),
+    rollbackDaemonSet: (namespace: string, name: string, revisionName: string) =>
+      request<{ status: string; toRevision: string }>(`/daemonsets/${namespace}/${name}/rollback`, {
+        method: 'POST',
+        body: JSON.stringify({ revisionName }),
+      }),
   },
 
   services: {
@@ -911,6 +974,11 @@ export const api = {
       }),
     binpacking: (name: string) =>
       request<BinPackingResponse>(`/nodes/${encodeURIComponent(name)}/binpacking`),
+  },
+
+  topology: {
+    get: (namespace?: string) =>
+      request<TopologyResponse>(`/topology${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`),
   },
 
   workloads: {
@@ -1102,6 +1170,58 @@ export interface HealthEvent {
   age: string;
 }
 
+export interface TopologyPod {
+  namespace: string;
+  name: string;
+  phase: string;
+  workloadKey: string;
+}
+
+export interface TopologyNode {
+  name: string;
+  zone?: string;
+  ready: boolean;
+  pods: TopologyPod[];
+}
+
+export interface TopologyNodepool {
+  name: string;
+  nodes: TopologyNode[];
+}
+
+export interface TopologyWorkload {
+  kind: string;
+  namespace: string;
+  name: string;
+  key: string;
+  podCount: number;
+}
+
+export interface TopologyResponse {
+  nodepools: TopologyNodepool[];
+  workloads: TopologyWorkload[];
+}
+
+export interface RevisionInfo {
+  revision: number;
+  name?: string;
+  createdAt: string;
+  age: string;
+  images: string[];
+  changeCause?: string;
+  current: boolean;
+}
+
+export interface HealthResourcePressure {
+  namespace: string;
+  podName: string;
+  container: string;
+  kind: 'CPU' | 'Memory';
+  usagePercent: number;
+  usage: string;
+  limit: string;
+}
+
 export interface HealthResponse {
   namespace: string;
   crashLooping: HealthPodIssue[];
@@ -1109,6 +1229,8 @@ export interface HealthResponse {
   pending: HealthPodIssue[];
   unhealthyWorkloads: HealthWorkloadIssue[];
   recentWarnings: HealthEvent[];
+  resourcePressure: HealthResourcePressure[];
+  metricsAvailable: boolean;
 }
 
 export interface VersionInfo {

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ClusterStatus } from '../App';
 import { ClusterSelect } from './ClusterSelect';
 import { NamespaceSelect } from './NamespaceSelect';
+import { ReauthBanner } from './ReauthBanner';
 import { api } from '../services/api';
 import {
   Box,
@@ -51,6 +52,7 @@ const navGroups: NavGroup[] = [
     title: '',
     items: [
       { path: '/', label: 'Overview', icon: Box },
+      { path: '/topology', label: 'Topology', icon: Network },
       { path: '/nodes', label: 'Nodes', icon: Monitor },
       { path: '/namespaces', label: 'Namespaces', icon: Folder },
       { path: '/events', label: 'Events', icon: Clock },
@@ -378,15 +380,10 @@ export function Layout({
           </button>
         </header>
 
-        {/* Connection error banner */}
+        {/* Connection error banner — offers in-place re-login when the cause
+            is expired cloud credentials */}
         {connectionStatus === 'error' && connectionError && (
-          <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <div className="text-sm text-red-700">
-              <span className="font-medium">Connection failed:</span>{' '}
-              {connectionError}
-            </div>
-          </div>
+          <ReauthBanner error={connectionError} />
         )}
 
         {/* Page content */}

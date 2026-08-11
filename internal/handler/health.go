@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -50,13 +51,28 @@ type HealthEvent struct {
 	Age       string `json:"age"`
 }
 
+// HealthResourcePressure flags containers running close to their CPU or
+// memory limit. Computed as a heuristic from metrics-server usage vs
+// limits — actual CFS throttling needs cAdvisor counters we don't read.
+type HealthResourcePressure struct {
+	Namespace    string `json:"namespace"`
+	PodName      string `json:"podName"`
+	Container    string `json:"container"`
+	Kind         string `json:"kind"` // "CPU" or "Memory"
+	UsagePercent int    `json:"usagePercent"`
+	Usage        string `json:"usage"` // human readable (e.g. "180m", "256Mi")
+	Limit        string `json:"limit"`
+}
+
 type HealthResponse struct {
-	Namespace          string                `json:"namespace"`
-	CrashLooping       []HealthPodIssue      `json:"crashLooping"`
-	OOMKilled          []HealthPodIssue      `json:"oomKilled"`
-	Pending            []HealthPodIssue      `json:"pending"`
-	UnhealthyWorkloads []HealthWorkloadIssue `json:"unhealthyWorkloads"`
-	RecentWarnings     []HealthEvent         `json:"recentWarnings"`
+	Namespace          string                   `json:"namespace"`
+	CrashLooping       []HealthPodIssue         `json:"crashLooping"`
+	OOMKilled          []HealthPodIssue         `json:"oomKilled"`
+	Pending            []HealthPodIssue         `json:"pending"`
+	UnhealthyWorkloads []HealthWorkloadIssue    `json:"unhealthyWorkloads"`
+	RecentWarnings     []HealthEvent            `json:"recentWarnings"`
+	ResourcePressure   []HealthResourcePressure `json:"resourcePressure"`
+	MetricsAvailable   bool                     `json:"metricsAvailable"`
 }
 
 const pendingThreshold = 5 * time.Minute
@@ -78,6 +94,7 @@ func (h *HealthHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		Pending:            []HealthPodIssue{},
 		UnhealthyWorkloads: []HealthWorkloadIssue{},
 		RecentWarnings:     []HealthEvent{},
+		ResourcePressure:   []HealthResourcePressure{},
 	}
 	now := time.Now()
 
@@ -96,8 +113,11 @@ func (h *HealthHandler) Get(ctx *gofr.Context) (interface{}, error) {
 					Age:       formatAge(pod.CreationTimestamp.Time),
 				})
 			}
-			// Container-level signals.
-			for _, cs := range pod.Status.ContainerStatuses {
+			// Container-level signals. Init containers crashloop too — kubelet
+			// reports the same Waiting.Reason on InitContainerStatuses.
+			allStatuses := append([]corev1.ContainerStatus{}, pod.Status.ContainerStatuses...)
+			allStatuses = append(allStatuses, pod.Status.InitContainerStatuses...)
+			for _, cs := range allStatuses {
 				if cs.State.Waiting != nil {
 					reason := cs.State.Waiting.Reason
 					if reason == "CrashLoopBackOff" {
@@ -200,7 +220,77 @@ func (h *HealthHandler) Get(ctx *gofr.Context) (interface{}, error) {
 		})
 	}
 
+	// Resource pressure: pods running near CPU or memory limit. Best-effort —
+	// silently skip if metrics-server isn't reachable.
+	if mc, err := h.k8s.GetMetricsClient(); err == nil {
+		if pmList, err := mc.MetricsV1beta1().PodMetricses(namespace).List(context.Background(), metav1.ListOptions{}); err == nil {
+			resp.MetricsAvailable = true
+			// Index usage by ns/pod/container.
+			type usage struct{ cpu, mem int64 }
+			usageMap := map[string]usage{}
+			for _, pm := range pmList.Items {
+				for _, c := range pm.Containers {
+					key := pm.Namespace + "/" + pm.Name + "/" + c.Name
+					usageMap[key] = usage{
+						cpu: c.Usage.Cpu().MilliValue(),
+						mem: c.Usage.Memory().Value(),
+					}
+				}
+			}
+			for _, pod := range pods.Items {
+				if pod.Status.Phase != corev1.PodRunning {
+					continue
+				}
+				for _, c := range pod.Spec.Containers {
+					limits := c.Resources.Limits
+					u, ok := usageMap[pod.Namespace+"/"+pod.Name+"/"+c.Name]
+					if !ok {
+						continue
+					}
+					if cpuLim := limits.Cpu().MilliValue(); cpuLim >= 10 && u.cpu*100/cpuLim >= 95 {
+						resp.ResourcePressure = append(resp.ResourcePressure, HealthResourcePressure{
+							Namespace:    pod.Namespace,
+							PodName:      pod.Name,
+							Container:    c.Name,
+							Kind:         "CPU",
+							UsagePercent: int(u.cpu * 100 / cpuLim),
+							Usage:        fmt.Sprintf("%dm", u.cpu),
+							Limit:        fmt.Sprintf("%dm", cpuLim),
+						})
+					}
+					if memLim := limits.Memory().Value(); memLim >= 64*1024*1024 && u.mem*100/memLim >= 90 {
+						resp.ResourcePressure = append(resp.ResourcePressure, HealthResourcePressure{
+							Namespace:    pod.Namespace,
+							PodName:      pod.Name,
+							Container:    c.Name,
+							Kind:         "Memory",
+							UsagePercent: int(u.mem * 100 / memLim),
+							Usage:        humanBytes(u.mem),
+							Limit:        humanBytes(memLim),
+						})
+					}
+				}
+			}
+			sort.SliceStable(resp.ResourcePressure, func(i, j int) bool {
+				return resp.ResourcePressure[i].UsagePercent > resp.ResourcePressure[j].UsagePercent
+			})
+		}
+	}
+
 	return resp, nil
+}
+
+func humanBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%ci", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // pendingMessage extracts the most useful "why is this pod pending" message

@@ -10,6 +10,7 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ContainerCard, PodContainersGroup } from '../components/ContainerCard';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { RevisionsPanel } from '../components/RevisionsPanel';
 import { SetImageModal } from '../components/SetImageModal';
 import { TailLogsModal } from '../components/MultiPodLogModal';
 import type { PodTarget } from '../components/MultiPodLogModal';
@@ -273,7 +274,6 @@ function DeploymentDetailsPanel({
           )}
         </div>
 
-        {/* Tabbed Metadata Section */}
         <MetadataTabs
           tabs={[
             { key: 'env', label: 'Environment', envData: details.containerDetails?.map(c => ({ name: c.name, env: c.env || [] })) },
@@ -309,39 +309,50 @@ function DeploymentDetailsPanel({
           </div>
         )}
 
-        {/* Events */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Events</h3>
-          {eventsLoading ? (
-            <p className="text-gray-500 text-sm">Loading...</p>
-          ) : events && events.length > 0 ? (
-            <div className="space-y-2">
-              {events.map((event, idx) => (
-                <div
-                  key={idx}
-                  className={`border-l-2 pl-3 py-1 ${
-                    event.type === 'Warning' ? 'border-yellow-400' : 'border-green-400'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs font-medium ${
-                      event.type === 'Warning' ? 'text-yellow-700' : 'text-green-700'
-                    }`}>
-                      {event.reason}
-                    </span>
-                    {event.count > 1 && (
-                      <span className="text-xs text-gray-400">x{event.count}</span>
-                    )}
-                    <span className="text-xs text-gray-400">{event.age}</span>
+        <MetadataTabs
+          tabs={[
+            {
+              key: 'events',
+              label: 'Events',
+              content: (
+                eventsLoading ? (
+                  <p className="text-gray-500 text-sm">Loading...</p>
+                ) : events && events.length > 0 ? (
+                  <div className="space-y-2">
+                    {events.map((event, idx) => (
+                      <div
+                        key={idx}
+                        className={`border-l-2 pl-3 py-1 ${
+                          event.type === 'Warning' ? 'border-yellow-400' : 'border-green-400'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-medium ${
+                            event.type === 'Warning' ? 'text-yellow-700' : 'text-green-700'
+                          }`}>
+                            {event.reason}
+                          </span>
+                          {event.count > 1 && (
+                            <span className="text-xs text-gray-400">x{event.count}</span>
+                          )}
+                          <span className="text-xs text-gray-400">{event.age}</span>
+                        </div>
+                        <p className="text-sm text-gray-600">{event.message}</p>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm text-gray-600">{event.message}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-sm">No events</p>
-          )}
-        </div>
+                ) : (
+                  <p className="text-gray-500 text-sm">No events</p>
+                )
+              ),
+            },
+            {
+              key: 'rollouts',
+              label: 'Rollouts',
+              content: <RevisionsPanel kind="deployment" namespace={details.namespace} name={details.name} />,
+            },
+          ]}
+        />
       </div>
     </div>
   );

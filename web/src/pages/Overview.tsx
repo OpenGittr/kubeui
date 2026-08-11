@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
-import type { HealthResponse, HealthPodIssue, HealthWorkloadIssue, HealthEvent } from '../services/api';
+import type { HealthResponse, HealthPodIssue, HealthWorkloadIssue, HealthEvent, HealthResourcePressure } from '../services/api';
 import {
   Server,
   Layers,
@@ -14,6 +14,7 @@ import {
   Clock,
   Activity,
   Bell,
+  Flame,
 } from 'lucide-react';
 import { useSummary } from '../hooks/useRealTimeUpdates';
 import { selectedHref } from '../hooks/useSelectedResource';
@@ -105,7 +106,7 @@ function HealthCard({
       <div className={`flex items-center gap-2 px-4 py-2 border-b ${toneClass}`}>
         {icon}
         <span className="font-semibold text-sm">{title}</span>
-        <span className="ml-auto text-xs font-mono px-2 py-0.5 rounded bg-white/70">
+        <span className="ml-auto text-xs font-mono px-2 py-0.5 rounded bg-white/70 dark:bg-white/10">
           {count}
         </span>
       </div>
@@ -160,6 +161,24 @@ function WorkloadRow({ issue }: { issue: HealthWorkloadIssue }) {
   ) : inner;
 }
 
+function PressureRow({ issue }: { issue: HealthResourcePressure }) {
+  return (
+    <Link
+      to={selectedHref('/pods', issue.namespace, issue.podName)}
+      className="flex items-baseline gap-2 px-4 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+      title={`${issue.kind} ${issue.usage} / ${issue.limit}`}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-blue-600 truncate">{issue.podName}</div>
+        <div className="text-xs text-gray-500 truncate">
+          {issue.namespace} · <span className="font-mono">{issue.container}</span> · {issue.kind} {issue.usage}/{issue.limit}
+        </div>
+      </div>
+      <span className="text-xs font-mono shrink-0 text-amber-700">{issue.usagePercent}%</span>
+    </Link>
+  );
+}
+
 function EventRow({ event }: { event: HealthEvent }) {
   return (
     <div className="px-4 py-2 border-b border-gray-100 last:border-b-0">
@@ -211,7 +230,8 @@ export function Overview({ namespace, isConnected = true }: OverviewProps) {
       health.oomKilled.length +
       health.pending.length +
       health.unhealthyWorkloads.length +
-      health.recentWarnings.length
+      health.recentWarnings.length +
+      health.resourcePressure.length
     : 0;
 
   return (
@@ -310,6 +330,24 @@ export function Overview({ namespace, isConnected = true }: OverviewProps) {
           >
             {health.unhealthyWorkloads.map((w, i) => <WorkloadRow key={i} issue={w} />)}
           </HealthCard>
+
+          {health.metricsAvailable && (
+            <HealthCard
+              title="Resource pressure (heuristic)"
+              icon={<Flame className="w-4 h-4" />}
+              tone="amber"
+              count={health.resourcePressure.length}
+              footer={
+                health.resourcePressure.length > 5 && (
+                  <div className="block px-4 py-2 text-xs text-gray-500 border-t border-gray-100">
+                    + {health.resourcePressure.length - 5} more
+                  </div>
+                )
+              }
+            >
+              {health.resourcePressure.slice(0, 5).map((p, i) => <PressureRow key={i} issue={p} />)}
+            </HealthCard>
+          )}
 
           <HealthCard
             title="Recent warning events"
