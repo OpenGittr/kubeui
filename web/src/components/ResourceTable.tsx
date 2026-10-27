@@ -23,6 +23,8 @@ interface ResourceTableProps<T> {
   getRowKey: (item: T) => string;
   actions?: (item: T) => React.ReactNode;
   resourceType?: string;
+  // Human-readable kind for the delete dialog; falls back to resourceType minus its trailing 's'.
+  kindLabel?: string;
   getResourceInfo?: (item: T) => { namespace?: string; name: string };
   onDelete?: (item: T) => void;
   canDelete?: boolean;
@@ -42,6 +44,7 @@ export function ResourceTable<T>({
   getRowKey,
   actions,
   resourceType,
+  kindLabel,
   getResourceInfo,
   onDelete,
   canDelete = true,
@@ -265,7 +268,7 @@ export function ResourceTable<T>({
       {deleteTarget && getResourceInfo && onDelete && (
         <ConfirmDialog
           isOpen={!!deleteTarget}
-          title={`Delete ${resourceType ? resourceType.slice(0, -1).charAt(0).toUpperCase() + resourceType.slice(1, -1) : 'Resource'}`}
+          title={`Delete ${kindLabel ? kindLabel : resourceType ? resourceType.slice(0, -1).charAt(0).toUpperCase() + resourceType.slice(1, -1) : 'Resource'}`}
           message={`Are you sure you want to delete "${getResourceInfo(deleteTarget).name}"? This action cannot be undone.`}
           confirmLabel="Delete"
           variant="danger"

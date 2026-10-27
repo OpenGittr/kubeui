@@ -1,7 +1,14 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
 import { useState } from 'react';
+import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+
+const QUOTA_CHECKS = [
+  { verb: 'delete', group: '', resource: 'resourcequotas' },
+  { verb: 'delete', group: '', resource: 'limitranges' },
+];
 
 interface QuotasProps {
   namespace?: string;
@@ -24,6 +31,33 @@ export function Quotas({ namespace, isConnected = true }: QuotasProps) {
     queryFn: () => api.quotas.listLimitRanges(namespace),
     refetchInterval: isConnected ? 10000 : false,
     enabled: isConnected && view === 'limitranges',
+  });
+
+  const { addToast } = useToast();
+  const { can } = usePermissions(namespace, QUOTA_CHECKS);
+  const canDeleteRQ = can('delete', '', 'resourcequotas');
+  const canDeleteLR = can('delete', '', 'limitranges');
+
+  const deleteRQ = useMutation({
+    mutationFn: ({ ns, name }: { ns: string; name: string }) => api.quotas.deleteResourceQuota(ns, name),
+    onSuccess: (_, { name }) => {
+      queryClient.invalidateQueries({ queryKey: ['resourcequotas'] });
+      addToast(`Deleted resource quota ${name}`, 'success');
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
+  });
+
+  const deleteLR = useMutation({
+    mutationFn: ({ ns, name }: { ns: string; name: string }) => api.quotas.deleteLimitRange(ns, name),
+    onSuccess: (_, { name }) => {
+      queryClient.invalidateQueries({ queryKey: ['limitranges'] });
+      addToast(`Deleted limit range ${name}`, 'success');
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
   });
 
   if (!isConnected) {
@@ -57,6 +91,10 @@ export function Quotas({ namespace, isConnected = true }: QuotasProps) {
           getRowKey={(item) => `${item.namespace}/${item.name}`}
           resourceType="resourcequotas"
           getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
+          kindLabel="ResourceQuota"
+          onDelete={(item) => deleteRQ.mutate({ ns: item.namespace, name: item.name })}
+          canDelete={canDeleteRQ}
+          deleteTitle={canDeleteRQ ? undefined : 'Requires delete on resourcequotas'}
           columns={[
             { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
             { key: 'namespace', header: 'Namespace', className: 'text-gray-600' },
@@ -96,6 +134,10 @@ export function Quotas({ namespace, isConnected = true }: QuotasProps) {
           getRowKey={(item) => `${item.namespace}/${item.name}`}
           resourceType="limitranges"
           getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
+          kindLabel="LimitRange"
+          onDelete={(item) => deleteLR.mutate({ ns: item.namespace, name: item.name })}
+          canDelete={canDeleteLR}
+          deleteTitle={canDeleteLR ? undefined : 'Requires delete on limitranges'}
           columns={[
             { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
             { key: 'namespace', header: 'Namespace', className: 'text-gray-600' },

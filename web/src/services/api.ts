@@ -35,6 +35,20 @@ export interface NamespaceInfo {
   age: string;
 }
 
+export interface NamespaceContentGroup {
+  kind: string;
+  count: number;
+  names?: string[];
+  error?: string;
+}
+
+export interface NamespaceContents {
+  namespace: string;
+  status: string;
+  protected: boolean;
+  groups: NamespaceContentGroup[];
+}
+
 export interface PodInfo {
   name: string;
   namespace: string;
@@ -762,6 +776,10 @@ export const api = {
 
   namespaces: {
     list: () => request<NamespaceInfo[]>('/namespaces'),
+    contents: (name: string) =>
+      request<NamespaceContents>(`/namespaces/${name}/contents`),
+    delete: (name: string) =>
+      request<{ message: string }>(`/namespaces/${name}`, { method: 'DELETE' }),
   },
 
   pods: {
@@ -937,6 +955,10 @@ export const api = {
     listPVs: () => request<PVInfo[]>('/pvs'),
     listPVCs: (namespace?: string) =>
       request<PVCInfo[]>(`/pvcs${namespace ? `?namespace=${namespace}` : ''}`),
+    deletePV: (name: string) =>
+      request<{ message: string }>(`/pvs/${name}`, { method: 'DELETE' }),
+    deletePVC: (namespace: string, name: string) =>
+      request<{ message: string }>(`/pvcs/${namespace}/${name}`, { method: 'DELETE' }),
   },
 
   yaml: {
@@ -1046,6 +1068,8 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }),
+    delete: (namespace: string, name: string) =>
+      request<{ message: string }>(`/hpas/${namespace}/${name}`, { method: 'DELETE' }),
   },
 
   events: {
@@ -1057,11 +1081,15 @@ export const api = {
 
   storageClasses: {
     list: () => request<StorageClassInfo[]>('/storageclasses'),
+    delete: (name: string) =>
+      request<{ message: string }>(`/storageclasses/${name}`, { method: 'DELETE' }),
   },
 
   serviceAccounts: {
     list: (namespace?: string) =>
       request<ServiceAccountInfo[]>(`/serviceaccounts${namespace ? `?namespace=${namespace}` : ''}`),
+    delete: (namespace: string, name: string) =>
+      request<{ message: string }>(`/serviceaccounts/${namespace}/${name}`, { method: 'DELETE' }),
   },
 
   quotas: {
@@ -1069,6 +1097,10 @@ export const api = {
       request<ResourceQuotaInfo[]>(`/resourcequotas${namespace ? `?namespace=${namespace}` : ''}`),
     listLimitRanges: (namespace?: string) =>
       request<LimitRangeInfo[]>(`/limitranges${namespace ? `?namespace=${namespace}` : ''}`),
+    deleteResourceQuota: (namespace: string, name: string) =>
+      request<{ message: string }>(`/resourcequotas/${namespace}/${name}`, { method: 'DELETE' }),
+    deleteLimitRange: (namespace: string, name: string) =>
+      request<{ message: string }>(`/limitranges/${namespace}/${name}`, { method: 'DELETE' }),
   },
 
   search: {

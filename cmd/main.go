@@ -122,6 +122,8 @@ func main() {
 
 	// Namespace routes
 	app.GET("/api/namespaces", namespaceHandler.List)
+	app.GET("/api/namespaces/{name}/contents", namespaceHandler.Contents)
+	app.DELETE("/api/namespaces/{name}", namespaceHandler.Delete)
 
 	// Pod routes
 	app.GET("/api/pods", podHandler.List)
@@ -189,6 +191,8 @@ func main() {
 	// Storage routes
 	app.GET("/api/pvs", storageHandler.ListPVs)
 	app.GET("/api/pvcs", storageHandler.ListPVCs)
+	app.DELETE("/api/pvs/{name}", storageHandler.DeletePV)
+	app.DELETE("/api/pvcs/{namespace}/{name}", storageHandler.DeletePVC)
 
 	// YAML routes
 	app.GET("/api/yaml/{type}/{namespace}/{name}", yamlHandler.Get)
@@ -235,6 +239,7 @@ func main() {
 	app.GET("/api/hpas/{namespace}/{name}", hpaHandler.Get)
 	app.GET("/api/hpas/{namespace}/{name}/events", hpaHandler.Events)
 	app.PATCH("/api/hpas/{namespace}/{name}", hpaHandler.Update)
+	app.DELETE("/api/hpas/{namespace}/{name}", hpaHandler.Delete)
 
 	// Event routes
 	app.GET("/api/events", eventHandler.List)
@@ -242,13 +247,17 @@ func main() {
 
 	// Storage Class routes
 	app.GET("/api/storageclasses", storageHandler.ListStorageClasses)
+	app.DELETE("/api/storageclasses/{name}", storageHandler.DeleteStorageClass)
 
 	// RBAC routes
 	app.GET("/api/serviceaccounts", rbacHandler.ListServiceAccounts)
+	app.DELETE("/api/serviceaccounts/{namespace}/{name}", rbacHandler.DeleteServiceAccount)
 
 	// Quota routes
 	app.GET("/api/resourcequotas", quotaHandler.ListResourceQuotas)
 	app.GET("/api/limitranges", quotaHandler.ListLimitRanges)
+	app.DELETE("/api/resourcequotas/{namespace}/{name}", quotaHandler.DeleteResourceQuota)
+	app.DELETE("/api/limitranges/{namespace}/{name}", quotaHandler.DeleteLimitRange)
 
 	// Permissions routes
 	app.GET("/api/permissions", permissionHandler.Get)

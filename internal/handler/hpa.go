@@ -358,3 +358,21 @@ func (h *HPAHandler) Events(ctx *gofr.Context) (interface{}, error) {
 
 	return result, nil
 }
+
+// Delete removes a HPA
+func (h *HPAHandler) Delete(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.AutoscalingV2().HorizontalPodAutoscalers(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("HPA %s deleted", name)}, nil
+}

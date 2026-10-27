@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -292,4 +293,56 @@ func (h *StorageHandler) ListPVCs(ctx *gofr.Context) (interface{}, error) {
 	}
 
 	return result, nil
+}
+
+// DeletePVC removes a PVC
+func (h *StorageHandler) DeletePVC(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("PVC %s deleted", name)}, nil
+}
+
+// DeletePV removes a cluster-scoped PV
+func (h *StorageHandler) DeletePV(ctx *gofr.Context) (interface{}, error) {
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.CoreV1().PersistentVolumes().Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("PV %s deleted", name)}, nil
+}
+
+// DeleteStorageClass removes a cluster-scoped StorageClass
+func (h *StorageHandler) DeleteStorageClass(ctx *gofr.Context) (interface{}, error) {
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.StorageV1().StorageClasses().Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("StorageClass %s deleted", name)}, nil
 }

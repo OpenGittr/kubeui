@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Namespace delete** - Lists everything inside the namespace (grouped by
+  kind, with a data-loss warning for PVCs) and requires typing the namespace
+  name to confirm; system namespaces are protected
+- **Delete actions** for HPAs, ServiceAccounts, PersistentVolumeClaims,
+  PersistentVolumes, StorageClasses, ResourceQuotas, and LimitRanges
+
+### Fixed
+
+- Delete confirmation titles no longer mangle kind names ("Delete Ingresse")
+
 ## [0.4.0] - 2026-08-11
 
 ### Added

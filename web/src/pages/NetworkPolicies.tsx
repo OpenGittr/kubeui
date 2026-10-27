@@ -53,6 +53,7 @@ export function NetworkPolicies({ namespace, isConnected = true }: NetworkPolici
       onRefresh={() => queryClient.invalidateQueries({ queryKey: ['networkpolicies'] })}
       getRowKey={(item) => `${item.namespace}/${item.name}`}
       resourceType="networkpolicies"
+      kindLabel="NetworkPolicy"
       getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
       onDelete={(item: NetworkPolicyInfo) => deleteMutation.mutate({ ns: item.namespace, name: item.name })}
       canDelete={canDelete}

@@ -1,6 +1,12 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
+import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+
+const SC_CHECKS = [
+  { verb: 'delete', group: 'storage.k8s.io', resource: 'storageclasses' },
+];
 
 interface StorageClassesProps {
   isConnected?: boolean;
@@ -14,6 +20,22 @@ export function StorageClasses({ isConnected = true }: StorageClassesProps) {
     queryFn: () => api.storageClasses.list(),
     refetchInterval: isConnected ? 10000 : false,
     enabled: isConnected,
+  });
+
+  const { addToast } = useToast();
+  const { can } = usePermissions(undefined, SC_CHECKS);
+  const canDelete = can('delete', 'storage.k8s.io', 'storageclasses');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on storageclasses';
+
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) => api.storageClasses.delete(name),
+    onSuccess: (_, name) => {
+      queryClient.invalidateQueries({ queryKey: ['storageclasses'] });
+      addToast(`Deleted storage class ${name}`, 'success');
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
   });
 
   if (!isConnected) {
@@ -30,6 +52,10 @@ export function StorageClasses({ isConnected = true }: StorageClassesProps) {
       getRowKey={(item) => item.name}
       resourceType="storageclasses"
       getResourceInfo={(item) => ({ name: item.name })}
+      kindLabel="StorageClass"
+      onDelete={(item) => deleteMutation.mutate(item.name)}
+      canDelete={canDelete}
+      deleteTitle={deleteTitle}
       columns={[
         { key: 'name', header: 'Name', render: (item) => (
           <div className="flex items-center gap-2">

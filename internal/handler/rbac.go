@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 
 	"gofr.dev/pkg/gofr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,4 +49,22 @@ func (h *RBACHandler) ListServiceAccounts(ctx *gofr.Context) (interface{}, error
 	}
 
 	return result, nil
+}
+
+// DeleteServiceAccount removes a ServiceAccount
+func (h *RBACHandler) DeleteServiceAccount(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.CoreV1().ServiceAccounts(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("ServiceAccount %s deleted", name)}, nil
 }

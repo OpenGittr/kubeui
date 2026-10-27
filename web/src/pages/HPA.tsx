@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { HPAInfo } from '../services/api';
-import { RefreshCw, FileCode, X, ChevronRight, Info, TrendingUp, TrendingDown, Activity, Scale, Save, AlertTriangle } from 'lucide-react';
+import { RefreshCw, FileCode, X, ChevronRight, Info, TrendingUp, TrendingDown, Activity, Scale, Save, AlertTriangle, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { YamlModal } from '../components/YamlModal';
 import { ActionMenu } from '../components/ActionMenu';
 import type { ActionMenuItem } from '../components/ActionMenu';
 import { MetadataTabs } from '../components/MetadataTabs';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSelectedResource, selectedHref } from '../hooks/useSelectedResource';
@@ -33,6 +34,7 @@ const SCALE_TARGET_ROUTES: Record<string, string> = {
 
 const HPA_CHECKS = [
   { verb: 'patch', group: 'autoscaling', resource: 'horizontalpodautoscalers' },
+  { verb: 'delete', group: 'autoscaling', resource: 'horizontalpodautoscalers' },
 ];
 
 function HPAEditModal({ hpa, onClose }: { hpa: HPAInfo; onClose: () => void }) {
@@ -582,6 +584,23 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
   const { can } = usePermissions(namespace, HPA_CHECKS);
   const canPatch = can('patch', 'autoscaling', 'horizontalpodautoscalers');
   const patchTitle = canPatch ? undefined : 'Requires patch on horizontalpodautoscalers';
+  const canDelete = can('delete', 'autoscaling', 'horizontalpodautoscalers');
+  const deleteTitle = canDelete ? undefined : 'Requires delete on horizontalpodautoscalers';
+  const [deleteTarget, setDeleteTarget] = useState<HPAInfo | null>(null);
+  const { addToast } = useToast();
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ ns, name }: { ns: string; name: string }) => api.hpas.delete(ns, name),
+    onSuccess: (_, { ns, name }) => {
+      queryClient.invalidateQueries({ queryKey: ['hpas'] });
+      addToast(`Deleted HPA ${name}`, 'success');
+      setDeleteTarget(null);
+      if (selectedHPA?.name === name && selectedHPA?.namespace === ns) setSelectedHPA(null);
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
+  });
 
   const { data: hpas, isLoading, error } = useQuery({
     queryKey: ['hpas', namespace],
@@ -611,6 +630,14 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
       disabled: !canPatch,
       title: patchTitle,
       onClick: () => setEditHPA(h),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 className="w-4 h-4" />,
+      variant: 'danger',
+      disabled: !canDelete,
+      title: deleteTitle,
+      onClick: () => setDeleteTarget(h),
     },
   ];
 
@@ -690,6 +717,14 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
                         icon: <FileCode className="w-4 h-4" />,
                         onClick: () => setYamlHPA(hpa),
                       },
+                      {
+                        label: 'Delete',
+                        icon: <Trash2 className="w-4 h-4" />,
+                        variant: 'danger',
+                        disabled: !canDelete,
+                        title: deleteTitle,
+                        onClick: () => setDeleteTarget(hpa),
+                      },
                     ]}
                   />
                 </td>
@@ -713,6 +748,17 @@ export function HPA({ namespace, isConnected = true }: HPAProps) {
       )}
 
       {editHPA && <HPAEditModal hpa={editHPA} onClose={() => setEditHPA(null)} />}
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete HPA"
+        message={`Are you sure you want to delete HPA "${deleteTarget?.name}"? The target workload will stop autoscaling and stay at its current replica count.`}
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate({ ns: deleteTarget.namespace, name: deleteTarget.name })}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {selectedHPA && (
         <HPADetailsPanel

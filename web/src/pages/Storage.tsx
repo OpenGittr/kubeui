@@ -1,8 +1,15 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { PVCInfo } from '../services/api';
 import { ResourceTable } from '../components/ResourceTable';
 import { useState } from 'react';
+import { useToast } from '../components/Toast';
+import { usePermissions } from '../hooks/usePermissions';
+
+const STORAGE_CHECKS = [
+  { verb: 'delete', group: '', resource: 'persistentvolumeclaims' },
+  { verb: 'delete', group: '', resource: 'persistentvolumes' },
+];
 
 function humanBytes(n: number): string {
   if (!n) return '0';
@@ -71,6 +78,33 @@ export function Storage({ namespace, isConnected = true }: StorageProps) {
     enabled: isConnected && view === 'pvs',
   });
 
+  const { addToast } = useToast();
+  const { can } = usePermissions(namespace, STORAGE_CHECKS);
+  const canDeletePVC = can('delete', '', 'persistentvolumeclaims');
+  const canDeletePV = can('delete', '', 'persistentvolumes');
+
+  const deletePVC = useMutation({
+    mutationFn: ({ ns, name }: { ns: string; name: string }) => api.storage.deletePVC(ns, name),
+    onSuccess: (_, { name }) => {
+      queryClient.invalidateQueries({ queryKey: ['pvcs'] });
+      addToast(`Deleted PVC ${name}`, 'success');
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
+  });
+
+  const deletePV = useMutation({
+    mutationFn: (name: string) => api.storage.deletePV(name),
+    onSuccess: (_, name) => {
+      queryClient.invalidateQueries({ queryKey: ['pvs'] });
+      addToast(`Deleted PV ${name}`, 'success');
+    },
+    onError: (error: Error) => {
+      addToast(`Failed to delete: ${error.message}`, 'error');
+    },
+  });
+
   if (!isConnected) {
     return <div className="text-gray-500">Not connected to cluster</div>;
   }
@@ -102,6 +136,10 @@ export function Storage({ namespace, isConnected = true }: StorageProps) {
           getRowKey={(item) => `${item.namespace}/${item.name}`}
           resourceType="pvcs"
           getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
+          kindLabel="PersistentVolumeClaim"
+          onDelete={(item) => deletePVC.mutate({ ns: item.namespace, name: item.name })}
+          canDelete={canDeletePVC}
+          deleteTitle={canDeletePVC ? undefined : 'Requires delete on persistentvolumeclaims'}
           columns={[
             { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
             { key: 'namespace', header: 'Namespace', className: 'text-gray-600' },
@@ -124,6 +162,10 @@ export function Storage({ namespace, isConnected = true }: StorageProps) {
           getRowKey={(item) => item.name}
           resourceType="pvs"
           getResourceInfo={(item) => ({ name: item.name })}
+          kindLabel="PersistentVolume"
+          onDelete={(item) => deletePV.mutate(item.name)}
+          canDelete={canDeletePV}
+          deleteTitle={canDeletePV ? undefined : 'Requires delete on persistentvolumes'}
           columns={[
             { key: 'name', header: 'Name', render: (item) => <span className="font-medium">{item.name}</span> },
             { key: 'capacity', header: 'Capacity' },

@@ -126,3 +126,39 @@ func (h *QuotaHandler) ListLimitRanges(ctx *gofr.Context) (interface{}, error) {
 
 	return result, nil
 }
+
+// DeleteResourceQuota removes a ResourceQuota
+func (h *QuotaHandler) DeleteResourceQuota(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.CoreV1().ResourceQuotas(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("ResourceQuota %s deleted", name)}, nil
+}
+
+// DeleteLimitRange removes a LimitRange
+func (h *QuotaHandler) DeleteLimitRange(ctx *gofr.Context) (interface{}, error) {
+	namespace := ctx.PathParam("namespace")
+	name := ctx.PathParam("name")
+
+	client, err := h.k8s.GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.CoreV1().LimitRanges(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"message": fmt.Sprintf("LimitRange %s deleted", name)}, nil
+}

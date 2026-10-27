@@ -53,6 +53,7 @@ export function Ingresses({ namespace, isConnected = true }: IngressesProps) {
       onRefresh={() => queryClient.invalidateQueries({ queryKey: ['ingresses'] })}
       getRowKey={(item) => `${item.namespace}/${item.name}`}
       resourceType="ingresses"
+      kindLabel="Ingress"
       getResourceInfo={(item) => ({ namespace: item.namespace, name: item.name })}
       onDelete={(item: IngressInfo) => deleteMutation.mutate({ ns: item.namespace, name: item.name })}
       canDelete={canDelete}
